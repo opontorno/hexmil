@@ -1,0 +1,9 @@
+PROJECT_CONTEXT.md
+__pycache__/
+baselines/git_repo/*
+results/
+runs/
+CL*.md
+*tmp*
+*.egg-info
+wandb/

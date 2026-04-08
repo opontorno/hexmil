@@ -1,0 +1,881 @@
+%%
+%% This is file `sample-sigconf-authordraft.tex',
+%% generated with the docstrip utility.
+%%
+%% The original source files were:
+%%
+%% samples.dtx  (with options: `all,proceedings,bibtex,authordraft')
+%% 
+%% IMPORTANT NOTICE:
+%% 
+%% For the copyright see the source file.
+%% 
+%% Any modified versions of this file must be renamed
+%% with new filenames distinct from sample-sigconf-authordraft.tex.
+%% 
+%% For distribution of the original source see the terms
+%% for copying and modification in the file samples.dtx.
+%% 
+%% This generated file may be distributed as long as the
+%% original source files, as listed above, are part of the
+%% same distribution. (The sources need not necessarily be
+%% in the same archive or directory.)
+%%
+%%
+%% Commands for TeXCount
+%TC:macro \cite [option:text,text]
+%TC:macro \citep [option:text,text]
+%TC:macro \citet [option:text,text]
+%TC:envir table 0 1
+%TC:envir table* 0 1
+%TC:envir tabular [ignore] word
+%TC:envir displaymath 0 word
+%TC:envir math 0 word
+%TC:envir comment 0 0
+%%
+%% The first command in your LaTeX source must be the \documentclass
+%% command.
+%%
+%% For submission and review of your manuscript please change the
+%% command to \documentclass[manuscript, screen, review]{acmart}.
+%%
+%% When submitting camera ready or to TAPS, please change the command
+%% to \documentclass[sigconf]{acmart} or whichever template is required
+%% for your publication.
+%%
+%%
+\documentclass[sigconf, screen, review, anonymous]{acmart}
+
+\usepackage{adjustbox}
+\usepackage{multicol}
+\usepackage{multirow}
+\usepackage{array}
+\usepackage[dvipsnames,table]{xcolor}
+\usepackage{hyperref}
+\usepackage{cleveref}
+\newcolumntype{C}{>{\huge}c}
+\newcolumntype{L}{>{\huge}l}
+\definecolor{mygray}{gray}{0.9}
+\definecolor{lightblue}{RGB}{173,216,230}
+%%
+%% \BibTeX command to typeset BibTeX logo in the docs
+\AtBeginDocument{%
+  \providecommand\BibTeX{{%
+    Bib\TeX}}}
+
+%% Rights management information.  This information is sent to you
+%% when you complete the rights form.  These commands have SAMPLE
+%% values in them; it is your responsibility as an author to replace
+%% the commands and values with those provided to you when you
+%% complete the rights form.
+\setcopyright{acmlicensed}
+\copyrightyear{2018}
+\acmYear{2018}
+\acmDOI{XXXXXXX.XXXXXXX}
+%% These commands are for a PROCEEDINGS abstract or paper.
+\acmConference[Conference acronym 'XX]{Make sure to enter the correct
+  conference title from your rights confirmation email}{June 03--05,
+  2018}{Woodstock, NY}
+%%
+%%  Uncomment \acmBooktitle if the title of the proceedings is different
+%%  from ``Proceedings of ...''!
+%%
+%%\acmBooktitle{Woodstock '18: ACM Symposium on Neural Gaze Detection,
+%%  June 03--05, 2018, Woodstock, NY}
+\acmISBN{978-1-4503-XXXX-X/2018/06}
+
+
+%%
+%% Submission ID.
+%% Use this when submitting an article to a sponsored event. You'll
+%% receive a unique submission ID from the organizers
+%% of the event, and this ID should be used as the parameter to this command.
+%%\acmSubmissionID{123-A56-BU3}
+
+%%
+%% For managing citations, it is recommended to use bibliography
+%% files in BibTeX format.
+%%
+%% You can then either use BibTeX with the ACM-Reference-Format style,
+%% or BibLaTeX with the acmnumeric or acmauthoryear sytles, that include
+%% support for advanced citation of software artefact from the
+%% biblatex-software package, also separately available on CTAN.
+%%
+%% Look at the sample-*-biblatex.tex files for templates showcasing
+%% the biblatex styles.
+%%
+
+%%
+%% The majority of ACM publications use numbered citations and
+%% references.  The command \citestyle{authoryear} switches to the
+%% "author year" style.
+%%
+%% If you are preparing content for an event
+%% sponsored by ACM SIGGRAPH, you must use the "author year" style of
+%% citations and references.
+%% Uncommenting
+%% the next command will enable that style.
+%%\citestyle{acmauthoryear}
+
+
+%%
+%% end of the preamble, start of the body of the document source.
+\begin{document}
+
+%%
+%% The "title" command has an optional parameter,
+%% allowing the author to define a "short title" to be used in page headers.
+\title{HexMIL: Ante-Hoc Explainable Detection of locally AI-manipulated CT Volumes without Spatial Supervision}
+
+%%
+%% The "author" command and its associated commands are used to define
+%% the authors and their affiliations.
+%% Of note is the shared affiliation of the first two authors, and the
+%% "authornote" and "authornotemark" commands
+%% used to denote shared contribution to the research.
+\author{Orazio Pontorno}
+\email{orazio.pontorno@phd.unict.it}
+\orcid{1234-5678-9012}
+\author{G.K.M. Tobin}
+\authornotemark[1]
+\email{webmaster@marysville-ohio.com}
+\affiliation{%
+  \institution{Institute for Clarity in Documentation}
+  \city{Dublin}
+  \state{Ohio}
+  \country{USA}
+}
+
+%%
+%% By default, the full list of authors will be used in the page
+%% headers. Often, this list is too long, and will overlap
+%% other information printed in the page headers. This command allows
+%% the author to define a more concise list
+%% of authors' names for this purpose.
+\renewcommand{\shortauthors}{Pontorno et al.}
+
+%%
+%% The abstract is a short summary of the work to be presented in the
+%% article.
+\begin{abstract}
+The growing accessibility of 3D generative models has introduced a critical threat to clinical infrastructure: malicious actors can intercept CT scans within hospital networks and inject or erase synthetic pathologies, potentially causing fatal misdiagnoses. Existing detection frameworks share two compounding limitations: they overfit to the generative architecture seen during training, failing under distribution shift, and they operate as black boxes, providing no spatially grounded justification for their decisions. In this work we propose \textbf{HexMIL} (Hierarchical EXplainable Multiple Instance Learning), a mask-free framework that addresses both limitations simultaneously. \textbf{HexMIL} decomposes each CT volume into a two-level hierarchy (patches within axial slices, and slices within the volume) applying independent gated attention at each level. Trained exclusively with binary volume-level labels and without any pixel-level spatial supervision, the framework produces a full-resolution 3D attention volume as a structural by-product of classification. This map constitutes an \emph{ante-hoc} explanation: the exact aggregation mechanism that drives the binary prediction, not a post-hoc saliency approximation. Evaluated on M3DSynth and CT-GAN under a rigorous out-of-distribution protocol --- training on a single generative architecture and testing on all unseen ones --- \textbf{HexMIL} outperforms all baselines by $+10.7$ AUC and $+9.4$ F1 in out-of-domain classification, and achieves the best average IoU and Pointing Game score in out-of-domain localization without ever being trained to localize.
+\end{abstract}
+
+%%
+%% The code below is generated by the tool at http://dl.acm.org/ccs.cfm.
+%% Please copy and paste the code instead of the example below.
+%%
+\begin{CCSXML}
+<ccs2012>
+   <concept>
+       <concept_id>10010147.10010178.10010224</concept_id>
+       <concept_desc>Computing methodologies~Computer vision</concept_desc>
+       <concept_significance>500</concept_significance>
+       </concept>
+ </ccs2012>
+\end{CCSXML}
+
+\ccsdesc[500]{Computing methodologies~Computer vision}
+
+%%
+%% Keywords. The author(s) should pick words that accurately describe
+%% the work being presented. Separate the keywords with commas.
+\keywords{AIGC Detection, Medical Deepfakes, XAI}
+%% A "teaser" image appears between the author and affiliation
+%% information and the body of the document, and typically spans the
+%% page.
+
+
+% \begin{teaserfigure}
+%   \includegraphics[width=\textwidth]{sampleteaser}
+%   \caption{Seattle Mariners at Spring Training, 2010.}
+%   \Description{Enjoying the baseball game from the third-base
+%   seats. Ichiro Suzuki preparing to bat.}
+%   \label{fig:teaser}
+% \end{teaserfigure}
+
+% \received{20 February 2007}
+% \received[revised]{12 March 2009}
+% \received[accepted]{5 June 2009}
+
+%%
+%% This command processes the author and affiliation and title
+%% information and builds the first part of the formatted document.
+\maketitle
+
+\section{Introduction}
+The integration of deep learning into medical imaging has catalyzed unprecedented advancements in automated diagnostics. However, it has concurrently exposed healthcare infrastructure to a severe cybersecurity vulnerability: medical deepfakes. A single altered CT scan can cost a patient their life. As 3D generative models reach photorealistic fidelity, malicious actors can exploit outdated security protocols within Picture Archiving and Communication Systems (PACS)~\cite{solaiyappan2022machine} to intercept and modify volumetric scans, injecting synthetic malignant tumors into healthy tissue or erasing genuine cancerous nodules~\cite{mirsky2019ct}. These localized anatomical manipulations are imperceptible to both radiologists and standard diagnostic pipelines, and can be carried out using 3D conditional Generative Adversarial Networks (GANs)~\cite{goodfellow2014generative} or Diffusion Models (DMs)~\cite{sohl2015deep, rombach2022ldm}. The consequences are fatal: a falsely injected nodule subjects a healthy patient to unwarranted invasive procedures, whereas an obliterated tumor denies a patient essential life-saving treatment. In the end, these small, hard-to-see forgeries could damage the basic trust that exists between doctors, AI diagnostic tools, and the patients they help~\cite{pradepan2025comprehensive}.\\
+In response to this targeted threat, the computer vision forensics community has developed passive detection methodologies to identify the generative noise fingerprints left by local inpainting. Early-stage countermeasures adapted standard Convolutional Neural Networks (CNNs) to classify 3D volumetric tampering, targeting the lung cancer injections or remotions generated by the pioneering CT-GAN framework~\cite{solaiyappan2022machine}. More recently, Zingarini et al.~\cite{zingarini2024m3dsynth} examined the capability of recent object detection methods that are manipulated by AI for detection and localization. Since none of them have been built for medical-domain tasks, they showed how these models struggle when facing medical imaging in medical contexts, especially for precise detection and classification of abnormalities. Other research focused on building robust detectors using different training strategies~\cite{dhanyalakshmi2026hybrid} or implementing more complex architectures~\cite{mahara2026forensic}. In settings where labeled fake volumes are scarce, unsupervised anomaly detection approaches have also been proposed: Back-in-Time Diffusion (BTD)~\cite{grabovski2025back} framework measures the residual reconstruction error after a single reverse diffusion step, exposing subtle inconsistencies in localized synthetic content across CT and MRI scans.\\
+Despite these advances, current detection frameworks exhibit critical vulnerabilities that preclude reliable clinical deployment. Supervised approaches suffer from severe overfitting to the generative model used during training; as demonstrated in~\cite{zingarini2024m3dsynth}, performance degrades drastically when confronted with manipulations generated by an unseen architecture. Unsupervised methods are more generalizable but structurally blind to certain attack vectors: as shown in~\cite{grabovski2025back}, they fail almost entirely at detecting tumor removal, since the inpainting process replaces forensic evidence with statistically plausible tissue, leaving no reconstruction residual to detect. Finally, and perhaps most critically for clinical translation, all existing detectors operate as black boxes: they output a binary label or an anomaly score, but provide no spatially grounded explanation of \emph{where} or \emph{why} the decision was made. In a high-stakes medical setting, physicians require transparent, interpretable evidence --- spatially grounded visual attribution maps --- to understand the algorithm's reasoning before altering a patient's treatment plan\cite{pradepan2025comprehensive, kaleta2025jointdiffusion}. There remains, therefore, an urgent need for a forensic framework that is simultaneously robust across generative architectures, sensitive to both injection and removal attacks, and natively interpretable without sacrificing detection accuracy.\\
+
+In this work, we propose \textbf{HexMIL} (Hierarchical EXplainable Multiple Instance Learning), a mask-free framework that simultaneously addresses all three limitations. Grounded in Attention-Based Multiple Instance Learning~\cite{ilse2018attention}, \textbf{HexMIL} decomposes each CT volume into a three-level hierarchy---local image patches, axial slices, and the full volume---applying independent gated attention at each level, named \textit{Patch Gated Attention} and \textit{Volume Gated Attention}. The framework is trained without any pixel-level spatial supervision: each stage relies exclusively on binary classification labels, and ground-truth segmentation masks are reserved entirely for evaluation. Despite this minimal annotation requirement, the two attention maps learned during training (one weighting patches within each slice, the other weighting slices within the volume) combine naturally into a full-resolution 3D attention volume that spatially delineates and localize the manipulated sub-volume (Section~\ref{sec:xai}). This 3D map is an \emph{ante-hoc} explanation: it is not a saliency map retrofitted onto a frozen classifier, but the exact aggregation mechanism that drives the binary prediction itself. Unlike post-hoc attribution methods such as Grad-CAM~\cite{selvaraju2017grad}, which are differentiable approximations retrofitted onto a frozen classifier, the attention weights in \textbf{HexMIL} are the exact aggregation function that drives the binary prediction: they are structurally intrinsic to the forward computation rather than an external approximation.
+We benchmark \textbf{HexMIL} on two public datasets---M3DSynth~\cite{zingarini2024m3dsynth}, and CT-GAN~\cite{mirsky2019ct}. Specifically, we assess its capabilities in detection and localization within an out-of-domain context. While it is trained on tampered volumes generated by a single generative architecture, it is evaluated on volumes altered by previously unseen architectures. Under this severe generalization setting, our method outperforms the state-of-the-art by a large margin.
+%The XAI module enables HexMIL to localize manipulated regions by constructing a \textit{3D Attention Volume} based on slice-level saliency maps. 
+
+\noindent The main contributions of this work are as follows:
+
+\begin{itemize}
+
+    \item \textbf{A unified framework for robust and interpretable 3D forensics.}
+    HexMIL is the first medical deepfake detection system to jointly address out-of-domain generalization across unseen generative architectures and natively interpretable 3D spatial attribution---two requirements no prior work satisfies simultaneously.
+
+    \item \textbf{Hierarchical mask-free training with intrinsic 3D spatial attribution.}
+    We formulate CT manipulation detection as a two-stage hierarchical MIL problem trained with volume-level binary labels only. The attention weights are structurally intrinsic to the forward computation, yielding a full-resolution 3D attention volume as a direct by-product of classification --- without any pixel-level supervision. To our knowledge, this is the first application of attention-based MIL to 3D medical deepfake detection.
+
+    \item \textbf{State-of-the-art performance and cross-modality generalization.}
+    HexMIL achieves superior out-of-domain classification and localization over all baselines, with attention maps that outperform post-hoc Grad-CAM and Grad-CAM++ in both Pointing Game and IoU under identical supervision conditions.
+
+\end{itemize}
+
+The rest of the paper is structured as follows: \Cref{sec:related} presents a comprehensive review of the current state of the art in medical deepfake detection, alongside discussions on Multiple Instance Learning and Explainability in medical imaging. In \Cref{sec:method}, we provide an in-depth overview of \textbf{HexMIL}'s architecture and training process. \Cref{sec:experiments} details the experimental results obtained in both out-of-domain classification and localization settings. Finally, \Cref{sec:conclusion} discusses the conclusions and limitations of the method.
+
+\section{Related Work}
+\label{sec:related}
+
+\noindent\textbf{AIGC Image detection.}
+The expansion of generative models has driven a rich body of forensic research on AI-generated content (AIGC). Early work concentrated on facial manipulation, exploiting low-level artifacts such as blending boundaries~\cite{rossler2019faceforensics++}, physiological inconsistencies~\cite{matern2019exploiting}, or classifier-based approaches trained on compression residuals~\cite{afchar2018mesonet}. As GAN synthesis matured, attention shifted to spectral signatures: CNNs trained for image generation leave characteristic high-frequency fingerprints that generalise across architectures~\cite{wang2020cnn, frank2020leveraging}. The challenge of detecting unseen generators then motivated universal, artifact-agnostic detectors~\cite{tan2024rethinking, yang2025d, pontorno2025deepfeaturex} and, more recently, methods tailored to the qualitatively distinct fingerprint of diffusion models, whose spectral profile differs markedly from that of GAN outputs~\cite{corvi2023detection, pontorno2024exploitation}.
+
+\noindent\textbf{Medical image forensics.}
+Mirsky~et~al.~\cite{mirsky2019ct} showed that a conditional GAN can inject or remove lung nodules from CT scans with quality sufficient to fool both radiologists and commercial CAD systems, establishing malicious CT tampering as a concrete clinical risk, giving rise to the phenomenon of Medical Deepfakes. On the detection side, Solaiyappan and Wen~\cite{solaiyappan2022machine} benchmarked standard 3D CNNs as binary classifiers, while MedNet~\cite{albahli2024mednet} added spatial-channel attention for improved sensitivity. MVSS-Net~\cite{chen2021image} pushed further toward spatial localisation via multi-view, multi-scale supervision, though it requires dense pixel-level annotations that are prohibitively expensive for 3D volumes. ManTraNet~\cite{wu2019mantra} approaches the problem differently, using an LSTM-based anomaly scoring module pre-trained on a large catalogue of manipulation types; TruFor~\cite{guillaro2023trufor} extends this direction with a Transformer backbone that jointly exploits RGB appearance and a learned noise-sensitive fingerprint. Both achieve competitive results on 2D forensics benchmarks, yet process each CT slice independently and discard inter-slice volumetric context. More recently, Back-in-Time Diffusion~\cite{grabovski2025back} proposed an unsupervised alternative based on reverse-diffusion residuals; the approach works well for injection attacks but struggles with removals, where the inpainted region is statistically close to healthy tissue. The M3DSynth benchmark~\cite{zingarini2024m3dsynth} now provides a controlled test bed spanning three generative families (pix2pix, CycleGAN, Diffusion Model) for both attack types, exposing the brittleness of existing detectors when evaluated outside their training distribution. Our work departs from this supervised-unsupervised dichotomy: we rely only on volume-level binary labels, yet recover spatial localisation as a by-product of the classification mechanism itself.
+
+\noindent\textbf{Multiple Instance Learning.}
+Multiple Instance Learning (MIL), introduced by Dietterich~et~al.~\cite{dietterich1997mil}, frames classification as a bag-level task over unordered instance sets. Deep MIL was transformed by Ilse~et~al.~\cite{ilse2018attention}, who replaced fixed pooling with a learnable gated attention mechanism that weights each instance by its estimated relevance, a formulation we adopt. In computational pathology, where gigapixel whole-slide images share the ``many patches, one label'' structure, attention MIL has become dominant: CLAM~\cite{lu2021data} combined instance-level clustering with attention for data-efficient classification; DSMIL~\cite{li2021dual} introduced dual-stream contrastive pretraining; TransMIL~\cite{shao2021transmil} injected Transformer-based correlation among instances; and DTFD-MIL~\cite{zhang2022dtfd} proposed double-tier feature distillation for pseudo-bag augmentation. However, all existing MIL architectures target 2D histology, processing a single tissue section as one bag. HexMIL extends the paradigm to 3D CT volumes by introducing a second, independent aggregation level  patch~$\to$~slice~$\to$~volume), with a two-stage training protocol that decouples low-level forensic feature learning from inter-slice evidence aggregation.
+
+\noindent\textbf{Explainability in medical imaging.}
+Post-hoc attribution methods remain the dominant approach to model interpretation in medical imaging. CAM~\cite{zhou2016learning} and its gradient-based extensions Grad-CAM~\cite{selvaraju2017grad} and GradCAM++~\cite{chattopadhay2018grad} generate saliency maps by backpropagating class-specific gradients through a frozen classifier. While widely adopted, these maps are approximations: Adebayo~et~al.~\cite{adebayo2018sanity} showed that several saliency methods produce visually plausible but semantically meaningless maps that survive model-weight randomisation, revealing a fundamental faithfulness gap. In contrast, the attention weights in HexMIL are the exact aggregation function that produces the classification score --- they are not retrofitted onto a frozen model but are intrinsic to inference. Removing or randomising them directly collapses the model to uniform averaging and measurably degrades classification, providing an intrinsic attribution mechanism that is structurally more aligned with the classification decision than any post-hoc approximation, since it constitutes the exact forward computation rather than a differentiable surrogate.
+
+
+\section{Proposed Method}
+\label{sec:method}
+The workflow of HexMIL is depicted in \Cref{fig:pipeline}. The framework is trained in two sequential stages. In the first stage (\Cref{fig:pipeline}a), we train a 2D slice encoder, named SliceMIL, for a binary classification task. The aim is to produce a discriminative representation of input slices using a gated attention pooling mechanism~\cite{ilse2018attention}, which also provides an attention map focusing on the tampered region.
+Once SliceMIL is trained, it is frozen and used as the slice encoder. In the second stage (\Cref{fig:pipeline}b), we train the entire HexMIL architecture: an input volume of $K$ slices is decomposed into individual slices, each of which is processed by the SliceMIL encoder. The resulting representations are combined using a novel independent gated attention pooling mechanism, which generates a 1D attention vector highlighting the most likely tampered slices. This resulting volume-level feature vector is then processed by a classification head designed to determine whether the volume contains a tampered sub-volume.
+\Cref{fig:pipeline}c illustrates the inference process. Since the model is trained on volumes of length $K$, and in real-world scenarios a CT scan may consist of a larger number $K'$ of slices, HexMIL divides the entire volume into $T$ sub-volumes of length $K$ and assigns a probability to each sub-volume. The final probability assigned to the input volume is given by the maximum of these probabilities. Finally, the two attention maps are combined, yielding a 3D attention volume.
+
+In the sections below, we provide a detailed problem formulation and a description of our method.
+
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=\linewidth]{pictures/hexmil_main.png}
+    \vspace{-.6cm}
+    \caption{
+        \textbf{HexMIL} graphical overview. 
+        \textbf{(a) SliceMIL training:} We train SliceMIL encoder module to distinguish between pristine and tampered slices based on their features (\Cref{sec:slice}).
+        \textbf{(b) HexMIL Training:} We train HexMIL model to identify and classify the presence of AI-manipulation within volume (\Cref{sec:volume}).
+        \textbf{(c) Inference:} A generic K'-slices volume is divided into K-slices sub-volumes during testing, and HexMIL processes each one. The highest of them determines the final score (\Cref{sec:xai}).
+        \includegraphics[height=10pt]{pictures/snowflake_2744-fe0f.png} Module with frozen parameters. \includegraphics[height=10pt]{pictures/fire_1f525.png} Module with trainable parameters.}
+    \label{fig:pipeline}
+\end{figure*}
+
+
+\subsection{Problem formulation}
+\label{sec:probl}
+We approach CT manipulation detection as a hierarchical binary classification problem. The task can be formalized as follows: Let $\mathcal{W} \in \mathbb{R}^{K\times H\times W}$ be a CT scan volume space and consider a dataset $\mathcal{D}^V=\mathcal{P}^V\cup \mathcal{T}^V$, composed of pristine volumes $\mathcal{P}^V \subset \mathcal{W}$, and tampered volumes $\mathcal{T}^V \subset \mathcal{W}$. The tampered scans are generated by a set of $Q$ generators $\mathcal{G} = \{\mathcal{G}_i\}^{Q}_{i=1}$, for each $i$, $\mathcal{T}^V_i = \{t^i_1, \ldots, t^i_{m_i}\}$ denotes the $m_i$ volumes generated by $\mathcal{G}_i$, hence $\mathcal{T}^V = \bigcup_{i=1}^Q\mathcal{T}^V_i$. Given an input volume $\mathcal{V} \in \mathcal{W}$, the objective is to predict the binary label $\hat{y} \in \{0,1\}$ ($0$: pristine, $1$: tampered).
+
+We partition the $Q$ generators into two disjoint sets for training and testing. The training set $\mathcal{D}^V_{train} = \mathcal{P}^V_{train} \cup (\bigcup_{i=1}^{\omega} \mathcal{T}^V_i)$ contains pristine volumes $\mathcal{P}^V_{train}$ and tampered volumes from $\omega < Q$ seen generators, while the test set $\mathcal{D}^V_{test} = \mathcal{P}^V_{test} \cup (\bigcup_{i=\omega+1}^{Q} \mathcal{T}^V_i)$ contains pristine volumes $\mathcal{P}^V_{test}$ and tampered volumes from the remaining $Q - \omega$ unseen generators, with $\mathcal{P}^V_{train} \cup \mathcal{P}^V_{test} = \mathcal{P}^V$ and $\mathcal{P}^V_{train} \cap \mathcal{P}^V_{test} = \emptyset$.
+
+From $\mathcal{D}^V_{train}$ we derive a slice-level dataset $\mathcal{D}^{S}_{train} = \mathcal{P}^S_{train} \cup \mathcal{T}^S_{train}$, where pristine slices $\mathcal{P}^S_{train}$ are sampled randomly from pristine volumes, and tampered slices $\mathcal{T}^S_{train}$ are those intersecting the manipulated sub-volume, identified via the nodule axial coordinate available as standard dataset metadata. An analogous procedure yields $\mathcal{D}^{S}_{test}$.
+
+
+
+
+% Let $\mathcal{V} = \{s_1, s_2, \ldots, s_K\}$ denote a CT volume consisting of $K$ axial slices, where each slice $s_k \in \mathbb{R}^{H \times W}$ is a single-channel grayscale image.
+% Each slice is decomposed into $N$ patches of size $P$ via a regular sliding window: $s_k = \{q_{k,1}, \ldots, q_{k,N}\}$, with $q_{k,n} \in \mathbb{R}^{P \times P}$.
+
+% We approach CT manipulation detection as a hierarchical binary classification problem. The training signal consists of a volume-level binary label $y \in \{0,1\}$ ($y\!=\!1$: manipulated, $y\!=\!0$: pristine) and the axial coordinate of the annotated nodule, which identifies the slice of interest for each volume. No pixel-level spatial supervision is used during training. For all manipulated volumes, ground-truth binary masks $\mathcal{M}_k \in \{0,1\}^{H\times W}$ are available in the dataset; we use them exclusively at evaluation time to quantify the spatial coherence of the emergent attention maps (Section~\ref{sec:xai}).
+
+% The objective of the proposed framework is to predict the binary label $\hat{y}$ for an unseen volume. As a by-product of the hierarchical attention mechanism, the framework additionally yields a 3D attention volume that spatially delineates the manipulated region---without any explicit spatial supervision. Both capabilities arise from a two-stage Multiple Instance Learning (MIL) formulation described below.
+
+% ────────────────────────────────────────────────────────────
+\subsection{Slice-Level Patch Aggregation (SliceMIL)}
+\label{sec:slice}
+
+In this stage, we explain the training process of the slice encoder, SliceMIL. Let $s_k \in \mathcal{D}^S_{train}$ be a training slice. This is decomposed into $N$ patches of size $P$ via a regular sliding window: $s_k = \{q_{k,1}, \ldots, q_{k,N}\}$, with $q_{k,n} \in \mathbb{R}^{P \times P}$. \\
+%
+\smallskip
+\noindent\textbf{Patch encoding.}
+Each patch $q_{k,n}$ is independently mapped to a $D$-dimensional feature vector by a shared CNN encoder $f_\theta$:
+%
+\begin{equation}
+    h_{k,n} = f_\theta(q_{k,n}) \;\in\; \mathbb{R}^{D},
+    \quad n = 1, \ldots, N,\;\; k = 1, \ldots, K.
+    \label{eq:patch_enc}
+\end{equation}
+%
+$h_{k,n}$ is a compact representation of the local texture and structural patterns within each patch.\\
+
+%
+\smallskip
+\noindent\textbf{Patch Gated Attention pooling.}
+To aggregate the $N$ patch features of slice $s_k$ into a single slice representation $\phi_k$, we adopt the Gated Attention mechanism of Ilse~\cite{ilse2018attention}: 
+%
+\begin{equation}
+    \alpha_{k,n} = \frac{
+        \exp\!\Bigl(\mathbf{w}^{\!\top}
+            \bigl(\tanh(\mathbf{V} h_{k,n})
+            \odot\, \sigma(\mathbf{U} h_{k,n})\bigr)\Bigr)
+    }{
+        \displaystyle\sum_{j=1}^{N}
+        \exp\!\Bigl(\mathbf{w}^{\!\top}
+            \bigl(\tanh(\mathbf{V} h_{k,j})
+            \odot\, \sigma(\mathbf{U} h_{k,j})\bigr)\Bigr)
+    },
+    \label{eq:alpha}
+\end{equation}
+%
+where $\mathbf{V}, \mathbf{U} \in \mathbb{R}^{L \times D}$ are learnable projection matrices and $\mathbf{w} \in \mathbb{R}^{L}$ is a learnable weight vector. The $\tanh(\cdot)$ branch extracts signed feature activations, while the sigmoid gate $\sigma(\mathbf{U} h_{k,n}) \in (0,1)$ selectively suppresses non-discriminative patches regardless of the sign of their activations~\cite{ilse2018attention}. The weights $\alpha_{k,n}$ sum to 1 over $n$ and are directly interpretable as the relative forensic relevance of each patch within the slice. The aggregated slice representation is:
+%
+\begin{equation}
+    \phi_k = \sum_{n=1}^{N} \alpha_{k,n}\, h_{k,n} \;\in\; \mathbb{R}^{D}.
+    \label{eq:slice_rep}
+\end{equation}
+%
+A two-layer fully-connected head $g_\eta \colon \mathbb{R}^{D} \to \mathbb{R}$ produces a binary logit $\hat{\ell}_k = g_\eta(\phi_k)$ for slice $s_k$.\\
+%
+\smallskip
+\noindent\textbf{Training.}
+Parameters $\theta, \mathbf{V}, \mathbf{U}, \mathbf{w}, \eta$ are optimized jointly. No spatial supervision is applied within the slice: the gated attention mechanism must discover which patches are forensically relevant autonomously. The training objective is binary cross-entropy (BCE):
+%
+\begin{equation}
+    \mathcal{L}_{\mathrm{slc}} = -\frac{1}{|\mathcal{D}^S_{train}|}
+    \sum_{(s_k, y_k) \in \mathcal{D}^S_{train}}
+    \Bigl[
+        y_k \log \sigma\!\bigl(\hat{\ell}_k\bigr)
+        + (1{-}y_k)\log\!\bigl(1 - \sigma\!\bigl(\hat{\ell}_k\bigr)\bigr)
+    \Bigr],
+    \label{eq:loss_cls}
+\end{equation}
+
+where $\hat{\ell}_k = g_\eta(\phi_k)$.
+
+% ────────────────────────────────────────────────────────────
+\subsection{Volume-Level Slice Aggregation (HexMIL)}
+\label{sec:volume}
+% Now, we will provide a detailed explanation of the HexMIL training process.
+
+After Stage 1 converges, the patch encoder $f_\theta$ and the entire SliceMIL sub-network $\{f_\theta,\mathbf{V},\mathbf{U},\mathbf{w},g_\eta\}$ are frozen and integrated into the \textbf{HexMIL} model.\\
+Let $\mathcal{V} = \{s_1, s_2, \ldots, s_K\} \in \mathcal{D}^V_{train}$ denote a CT volume consisting of $K$ axial slices. For each slice $s_k$ inside the volume we extract its representation $\phi_k = \textit{SliceMIL}(s_k)$. Obtaining the set of all $K$ slice representations $\{\phi_1, \ldots, \phi_K\}$.\\
+% With all  available, a second independent Gated Attention module aggregates them into a volume-level representation.
+%
+\smallskip
+\noindent\textbf{Sinusoidal positioning encoding.} 
+The slice encoder \textit{SliceMIL} processes each slice independently, meaning that the representations $\phi_k$ do not convey information about the specific location within the volume from which each slice was taken.\\
+To maintain this spatial ordering, we incorporate a fixed sinusoidal  positional encoding (PE)~\cite{vaswani2017attention} into each slice representation prior to aggregating them at the volume level. The position-aware slice representation is:
+
+\begin{equation}
+    \tilde{\phi}_k = \phi_k + \mathrm{PE}(z_k) \;\in\; \mathbb{R}^{D}. \label{eq:pe_add}
+\end{equation}
+
+\smallskip
+\noindent\textbf{Slice Gated Attention pooling.}
+The position-aware representations $\tilde{\phi}_k$ are aggregated by a second independent Gated Attention module:
+%
+\begin{equation}
+    \beta_k = \frac{
+        \exp\!\Bigl(\mathbf{w}'^{\!\top}
+            \bigl(\tanh(\mathbf{V}' \tilde{\phi}_k)
+            \odot\, \sigma(\mathbf{U}' \tilde{\phi}_k)\bigr)\Bigr)
+    }{
+        \displaystyle\sum_{j=1}^{K}
+        \exp\!\Bigl(\mathbf{w}'^{\!\top}
+            \bigl(\tanh(\mathbf{V}' \tilde{\phi}_j)
+            \odot\, \sigma(\mathbf{U}' \tilde{\phi}_j)\bigr)\Bigr)
+    },
+    \label{eq:beta}
+\end{equation}
+%
+where $\mathbf{V}', \mathbf{U}' \in \mathbb{R}^{L' \times D}$ and $\mathbf{w}' \in \mathbb{R}^{L'}$ are independent from the slice-level parameters in Eq.~\eqref{eq:alpha}.
+The volume representation and its classification logit are:
+%
+\begin{equation}
+    \psi = \sum_{k=1}^{K} \beta_k\, \tilde{\phi}_k \;\in\; \mathbb{R}^{D},
+    \qquad
+    \hat{y} = \mathbf{1}\!\left[\sigma\!\bigl(h_\xi(\psi)\bigr) \geq 0.5\right],
+    \label{eq:vol_rep}
+\end{equation}
+%
+where $h_\xi \colon \mathbb{R}^{D} \to \mathbb{R}$ is a fully-connected classification head. The scalar $\beta_k$ quantifies how much each slice contributes to the volume-level decision; it forms the inter-slice component of the 3D attention heatmap (Section~\ref{sec:xai}).\\
+%
+\smallskip
+\noindent\textbf{Training.}
+With the slice-level parameters $\theta, \mathbf{V}, \mathbf{U}, \mathbf{w}, \eta$ frozen, only the volume-level parameters $\{\mathbf{V}', \mathbf{U}', \mathbf{w}', h_\xi\}$ are optimized:
+%
+\begin{equation}
+\small
+    \mathcal{L}_V = -\frac{1}{|\mathcal{D}^V_{train}|}
+    \sum_{(\mathcal{V},\, y) \in \mathcal{D}^V_{train}}
+    \Bigl[
+        y \log \sigma\!\bigl(h_\xi(\psi)\bigr)
+        + (1{-}y)\log\!\bigl(1 - \sigma\!\bigl(h_\xi(\psi)\bigr)\bigr)
+    \Bigr].
+    \label{eq:loss_vol}
+\end{equation}
+%
+Freezing SliceMIL decouples patch-level representation learning from inter-slice evidence aggregation, preventing catastrophic forgetting of low-level forensic features while allowing $\beta_k$ to specialise on detecting which axial position carries the strongest manipulation signature. Neither $\mathcal{L}_{\mathrm{slc}}$ nor $\mathcal{L}_V$ employs any spatial supervision; the 3D attention structure that delineates the manipulated region emerges entirely as a by-product of the binary classification objective.
+
+% ────────────────────────────────────────────────────────────
+% \subsection{Two-Stage Training}
+% \label{sec:training}
+
+% The framework is trained in two sequential stages with complementary objectives.
+
+% \smallskip
+% \noindent\textbf{Stage 1 — SliceMIL training.}
+% Parameters $\theta, \mathbf{V}, \mathbf{U}, \mathbf{w}, \eta$ are optimised jointly. The training set $\mathcal{D}_S$ consists of individual axial slices 
+% %, each sampled at the annotated nodule coordinate~$z^*$ of its parent volume. Each slice inherits the binary label of the volume: slices drawn from manipulated volumes are labeled as positive ($y_k\!=\!1$), while those from pristine volumes serve as negatives ($y_k\!=\!0$). Because $z^*$ coincides with the manipulation site in fake volumes, every positive training sample contains the artefact. 
+% No spatial supervision is applied within the slice: the gated attention mechanism must discover which patches are forensically relevant autonomously. The training objective is binary cross-entropy (BCE):
+% %
+% \begin{equation}
+%     \mathcal{L}_{\mathrm{cls}} = -\frac{1}{|\mathcal{D}_S|}
+%     \sum_{(s_k, y_k) \in \mathcal{D}_S}
+%     \Bigl[
+%         y_k \log \sigma\!\bigl(g_\eta(\phi_k)\bigr)
+%         + (1{-}y_k)\log\!\bigl(1 - \sigma\!\bigl(g_\eta(\phi_k)\bigr)\bigr)
+%     \Bigr].
+%     \label{eq:loss_cls}
+% \end{equation}
+
+% \smallskip
+% \noindent\textbf{Stage 2 — HexMIL training.}
+% After Stage 1 converges, the patch encoder $f_\theta$ and the entire SliceMIL sub-network $\{f_\theta,\mathbf{V},\mathbf{U},\mathbf{w},g_\eta\}$ are frozen. Only the volume-level parameters $\{\mathbf{V}', \mathbf{U}', \mathbf{w}', h_\xi\}$ are optimised:
+% %
+% \begin{equation}
+%     \mathcal{L}_V = -\frac{1}{|\mathcal{D}_V|}
+%     \sum_{(\mathcal{V},\, y) \in \mathcal{D}_V}
+%     \Bigl[
+%         y \log \sigma\!\bigl(h_\xi(\psi)\bigr)
+%         + (1{-}y)\log\!\bigl(1 - \sigma\!\bigl(h_\xi(\psi)\bigr)\bigr)
+%     \Bigr].
+%     \label{eq:loss_vol}
+% \end{equation}
+% %
+% Freezing SliceMIL decouples patch-level representation learning from inter-slice evidence aggregation, preventing catastrophic forgetting of low-level forensic features while allowing $\beta_k$ to specialise on detecting which axial position carries the strongest manipulation signature. Neither $\mathcal{L}_{\mathrm{cls}}$ nor $\mathcal{L}_V$ employs any spatial supervision; the 3D attention structure that delineates the manipulated region emerges entirely as a by-product of the binary classification objective.
+
+% ────────────────────────────────────────────────────────────
+\subsection{Inference and XAI Module}
+\label{sec:xai}
+
+\noindent\textbf{Inference.}
+Each CT volume $\mathcal{V}$ may possess a varying number $K'$ of axial slices, rendering each model trained on a specific volume constrained in its applicability. To address this issue, HexMIL splits each volume into non-overlapping $K$-slice sub-volumes $\mathcal{V}_i, \quad i=1,\dots,T$, where $T=\texttt{int}(K'/K)$ and assigns a probability score $p_i$ to each for tampering. The entire volume score is determined by the highest scores among all:
+\begin{equation}
+    \mathbb{P}(Y=1|\mathcal{V})=\max(p_1,\dots,p_T).
+\end{equation}
+
+
+\noindent\textbf{Hierarchical heatmap construction.}
+At inference time, both attention maps are jointly available for each sub-volume: the inter-slice weights $\beta_k$ from the Volume Gated Attention and the intra-slice patch weights $\boldsymbol{\alpha}_k$ from the Patch Gated Attention. Two thresholds govern their combination and operate at \emph{different stages} of the pipeline on \emph{different signals}: $\tau_\beta$ filters individual slices based on the raw inter-slice weight $\beta_k$ \emph{before} the volume is formed, while $\tau_{3D}$ selects voxels based on the \emph{combined, normalised} product $\beta \times \alpha$ after the full 3D attention volume is assembled.
+
+Concretely, for each slice $k$ we first gate out uninformative slices:
+%
+\begin{equation}
+    \tilde{\beta}_k = \beta_k \cdot \mathbf{1}[\beta_k \geq \tau_\beta].
+    \label{eq:beta_mask}
+\end{equation}
+%
+Slices for which $\tilde{\beta}_k = 0$ contribute nothing to the heatmap; their intra-slice attention map $\boldsymbol{\alpha}_k$ is never evaluated. For the remaining slices, $\boldsymbol{\alpha}_k \in \mathbb{R}^N$ is reshaped into a 2D spatial grid and bilinearly upsampled to the original slice resolution, yielding $\tilde{A}_k \in \mathbb{R}^{H \times W}$. The raw local attention volume for sub-volume $\mathcal{V}_i$ is then assembled as:
+%
+\begin{equation}
+    \mathcal{H}^{(i)}_{3D}[k, i, j] = \tilde{\beta}_k \cdot \tilde{A}_k[i,\, j],
+    \quad k = 1,\ldots,K,\;\; (i,j) \in [H]\!\times\![W].
+    \label{eq:heatmap}
+\end{equation}
+%
+Each voxel encodes simultaneously \emph{where} within a slice the model focuses (via $\tilde{A}_k$) and \emph{which} slices are most informative for the volume decision (via $\tilde{\beta}_k$).
+
+\noindent\textbf{Full-volume heatmap assembly.}
+The procedure above yields a raw local attention volume $\mathcal{H}^{(i)}_{3D} \in \mathbb{R}^{K \times H \times W}$ for each sub-volume $\mathcal{V}_i$. When $T > 1$, these are concatenated along the slice axis to reconstruct the full-resolution map:
+%
+\begin{equation}
+    \mathcal{H}_{3D} = \left[\mathcal{H}^{(1)}_{3D} \;\big|\; \mathcal{H}^{(2)}_{3D} \;\big|\; \cdots \;\big|\; \mathcal{H}^{(T)}_{3D}\right] \in \mathbb{R}^{K' \times H \times W}.
+    \label{eq:heatmap_concat}
+\end{equation}
+%
+Smoothing and normalisation are then applied \emph{globally} to $\mathcal{H}_{3D}$, so that relevance scores are comparable across the entire scan rather than within each sub-volume independently:
+%
+\begin{equation}
+    \hat{\mathcal{H}}_{3D} =
+        \frac{G_\sigma * \mathcal{H}_{3D} - \min(\cdot)}
+             {\max(\cdot) - \min(\cdot) + \varepsilon},
+    \label{eq:norm}
+\end{equation}
+%
+where $G_\sigma$ is a Gaussian kernel. After normalisation, a value of $\hat{\mathcal{H}}_{3D}[k,i,j] = v$ means that voxel $(k,i,j)$ ranks in the top $(1-v)$ fraction of the most attended voxels in the entire scan.
+
+\smallskip
+\noindent\textbf{Attention Volume extraction.}
+We threshold $\hat{\mathcal{H}}_{3D}$ at $\tau$ and extract the tightest axis-aligned 3D bounding box:
+%
+\begin{equation}
+    \mathcal{M}_\tau = \mathbf{1}\!\left[\hat{\mathcal{H}}_{3D} > \tau_{3D}\right],
+    \qquad
+    B_\tau = \operatorname{BBox3D}(\mathcal{M}_\tau),
+    \label{eq:bbox}
+\end{equation}
+%
+where $B_\tau = (z_{\min}, z_{\max}, y_{\min}, y_{\max}, x_{\min}, x_{\max})$. Because $\hat{\mathcal{H}}_{3D}$ is globally normalised, $\tau$ has a relative interpretation: $\tau_{3D} \in (0,1)$ selects the top $(1-\tau)\cdot100\%$ of the most attended voxels, regardless of the absolute magnitude of the attention scores.
+
+% ────────────────────────────────────────────────────────────
+%  Figure placeholders
+% ────────────────────────────────────────────────────────────
+
+% \begin{figure}[t]
+%     \centering
+%     \includegraphics[width=\linewidth]{pictures/rem_309_slice_attn.png}
+%     \caption{}
+%     \label{fig:sl_attn}
+% \end{figure}
+
+\begin{figure}
+    \centering
+    \includegraphics[width=\linewidth]{pictures/bbox_3d.png}
+    \caption{XAI Module output. (a) Projection of attention maps and extracted Attention Volume along three axes. (b) 3D visualization of the attention heatmap (top) and the resulting 3D bounding box for spatial localization (bottom).}
+    \label{fig:placeholder}
+\end{figure}
+
+
+\section{Experiments}
+\label{sec:experiments}
+
+\noindent\textbf{Datasets.}
+We evaluate on two complementary benchmarks for local 3D manipulation detection in medical CT volumes, both built on the LIDC-IDRI collection~\cite{armato2011lung}.
+%
+\textit{CT-GAN}~\cite{mirsky2019ct} introduced the attack scenario of injecting and removing lung cancer nodules via a conditional GAN, producing a set of tampered volumes with pixel-level manipulation masks.
+%
+\textit{M3DSynth}~\cite{zingarini2024m3dsynth} extends this scenario to three diverse generative architectures --- a conditional pix2pix GAN, a CycleGAN, and a Diffusion Model --- each producing both injection and removal attacks, for a total of six manipulation configurations and 8{,}577 manipulated volumes alongside their pristine counterparts (over 11{,}000 nodule-level samples).
+The three modalities exhibit markedly different artefact signatures, making cross-modality evaluation a rigorous proxy for out-of-distribution generalisation.
+To the best of our knowledge, M3DSynth and CT-GAN are the only publicly available benchmark for \emph{local} 3D manipulation detection in medical imaging. Both datasets adopt patient-level train/validation/test splits to prevent data leakage.
+
+\noindent\textbf{Implementation details.}
+The patch encoder $f_\theta$ is a ResNet-50~\cite{he2016deep} initialised from ImageNet weights. Each axial slice is tiled into overlapping patches of size $P\!=\!64$ with stride $S\!=\!32$ (50\% overlap). Patch features are projected to $D\!=\!512$ dimensions via a linear layer followed by LayerNorm and GELU activation. The gated attention module uses an internal dimension $L\!=\!128$. We train for 100 epochs with AdamW ($\mathrm{lr}\!=\!10^{-4}$, $\mathrm{wd}\!=\!10^{-5}$). Class imbalance between real and fake slices is handled by a \texttt{WeightedRandomSampler}. Data augmentation consists of random horizontal and vertical flips. The frozen SliceMIL processes windows of $K\!=\!32$ consecutive slices. Sinusoidal positional encoding is added to each slice representation before the volume-level gated attention module ($L'\!=\!256$). We train for 100 epochs with AdamW ($\mathrm{lr}\!=\!10^{-4}$, $\mathrm{wd}\!=\!10^{-4}$). For the \textit{XAI Module} we use $\tau_\beta = 0.1$, $\sigma=0.03\max(K,H,W)$, and $\tau_{3D}=0.65$. All experiments use a single NVIDIA A6000 GPU and are fully reproducible with seed 42.
+
+\noindent\textbf{Baselines.}
+We compare HexMIL with an extensive set of baselines, including DeepFeatureX-SN\cite{pontorno2024exploitation}, FreqNet\cite{tan2024frequency}, NPR\cite{tan2024rethinking}, $D^3$\cite{yang2025d}, Xception~\cite{chollet2017xception}, HP-FCN~\cite{li2019localization}, ManTraNet~\cite{wu2019mantra}, MVSS-Net~\cite{chen2021image}, and TruFor~\cite{guillaro2023trufor}. DeepFeatureX-SN\cite{pontorno2024exploitation} is a modular architectures that uses contrastive learning to identify specific generators traces. Neighboring Pixel Relationships (NPR)\cite{tan2024rethinking} captures and characterizes the generalized structural artifacts present in synthetic contents stemming from up-sampling operations. FreqNet\cite{tan2024frequency} the detector to consistently concentrate on high-frequency input, utilizing high-frequency feature representation across spatial and channel dimensions. $D^3$ incoporates a parallel network branch that takes a distorted input image feature as an extra discrepancy signal and supplements its original counterpart. Xception~\cite{chollet2017xception} is a generic CNN deepfake detector. HP-FCN~\cite{li2019localization}, which prepends a high-pass filter layer to expose inpainting traces; ManTraNet~\cite{wu2019mantra} employs a lengthy short-term memory module to evaluate local abnormalities and utilizes self-supervised pre-training on 385 distinct picture operations; MVSS-Net~\cite{chen2021image} is a multi-scale network trained with pixel-level masks for the localization and detection of fraud; and TruFor~\cite{guillaro2023trufor}, a Transformer that that executes forgery localization by fusing RGB appearance with a learned noise-sensitive fingerprint, fine-tuned from pre-trained weights. All methods are inherently 2D: at inference, each axial slice is processed independently and the volume-level score is obtained by max-pooling across slice predictions. Furthermore, we include three additional architecturally motivated baselines. \textit{flat\_cnn} substitutes the MIL hierarchy with a ResNet-50~\cite{he2016deep} followed by global average pooling, applied slice-by-slice. \textit{r3d18} is a full 3D CNN (R3D-18~\cite{tran2018closer}) that captures volumetric context through 3D convolutions but without any attention mechanism. \textit{vit\_abmil} uses a ViT\cite{dosovitskiy2020image} patch encoder with single-level gated attention (no volume-level aggregation stage), equivalent to ABMIL~\cite{ilse2018attention} applied to CT slices.
+%
+%\textit{pool\_mil} is structurally identical to HexMIL but replaces learnable gated attention with mean or max pooling at both aggregation levels; it serves as the primary ablation in Section~\ref{sec:ablation}.
+
+
+\subsection{Results}
+\label{sec:res}
+We evaluate \textbf{HexMIL}'s capabilities in generalization for both classification and localization of the AI-manipulated volume. We train the model using the manipulated volumes from a single architecture present in the M3DSynth\cite{zingarini2024m3dsynth} and CT-GAN\cite{mirsky2019ct} datasets as fake parts in each scenario, while testing with all the others excluded.
+
+\begin{table*}[t]
+    \centering
+    \begin{adjustbox}{width=\textwidth, scale=2}
+    \renewcommand{\arraystretch}{1.5}
+    \begin{tabular}{L CCCCCCCCCCCC C}
+        \toprule
+        \multicolumn{14}{c}{\Huge \textbf{Out-of-domain Classification (AUC\,\% / F1\,\%)}} \\ %\cmidrule{1-12}
+        \midrule
+        Train set ($\to$) & \multicolumn{3}{c}{{\huge Pix2Pix}} & \multicolumn{3}{c}{{\huge CycleGAN}} & \multicolumn{3}{c}{{\huge DM}} & \multicolumn{3}{c}{{\huge CT-GAN}} & \multirow{2}{*}{Avg} \\
+        Test set ($\to$) & CycleGAN & DM & CT-GAN & Pix2Pix & DM & CT-GAN & Pix2Pix & CycleGAN & CT-GAN & Pix2Pix & CycleGAN & DM & \\ \cmidrule(lr){2-4} \cmidrule(lr){5-7} \cmidrule(lr){8-10} \cmidrule(lr){11-13} \cmidrule{14-14}
+
+        R3D-18 \cite{tran2018closer}
+            & 66.8/67.0 & 66.5/64.4 & 62.1/65.4
+            & 70.8/64.0 & 70.1/67.2 & 64.3/61.8
+            & 69.5/64.6 & 67.6/68.4 & 71.2/74.9
+            & 60.4/66.2 & 61.3/62.1 & 65.5/68.0
+            & 66.3/66.2 \\
+        
+        ResNet50-ABMIL \cite{he2016deep,ilse2018attention}
+            & 64.6/62.8 & 77.6/70.2 & 65.8/66.0
+            & 69.4/62.2 & 61.1/58.3 & 68.0/72.3
+            & 61.9/58.4 & 54.3/59.6 & 57.8/61.0
+            & 60.7/59.8 & 70.1/65.6 & 68.0/67.9
+            & 65.3/63.7 \\
+
+        ViT-ABMIL \cite{dosovitskiy2020image,ilse2018attention}
+            & 65.3/70.6 & 68.5/68.0 & 61.2/66.4
+            & 68.3/64.4 & 68.2/66.7 & 64.9/62.1
+            & 66.8/64.5 & 64.7/68.5 & 69.1/73.3
+            & 58.7/65.0 & 62.4/60.5 & 60.1/68.8
+            & 64.9/66.6 \\
+
+        DFX-SN~\cite{pontorno2025deepfeaturex}
+            & 73.1/\underline{\Huge 76.0} & 70.9/70.6 & 68.4/74.2
+            & 63.4/63.1 & 75.0/65.8 & 59.7/61.3
+            & 67.4/68.5 & 69.7/69.9 & 72.1/70.4
+            & 66.2/71.5 & 64.8/63.4 & 67.9/75.8
+            & 68.2/70.0 \\
+
+        HP-FCN \cite{li2019localization}
+            & 60.4/65.4 & 74.0/67.6 & 55.2/63.8
+            & 64.5/60.3 & 61.1/63.1 & 67.8/65.4
+            & 72.1/60.4 & 55.0/65.2 & 64.3/71.2
+            & 53.4/59.1 & 66.2/74.4 & 57.9/56.6
+            & 62.1/64.4 \\
+
+        MVSS-Net$^\dagger$ \cite{chen2021image}
+            & 63.4/66.9 & 72.9/63.2 & 58.7/64.2
+            & 65.4/59.1 & 64.9/63.1 & 69.2/71.5
+            & 74.8/58.9 & 59.0/66.8 & 67.5/65.9
+            & 55.1/62.3 & 68.4/70.1 & 60.8/63.4
+            & 65.0/64.6 \\
+
+        FreqNet~\cite{tan2024frequency}
+            & 62.0/71.4 & 71.9/67.4 & 57.8/63.2
+            & 53.4/63.1 & 62.0/64.7 & 55.6/62.1
+            & 72.4/75.5 & 68.7/65.0 & 66.5/72.3
+            & 58.9/66.4 & 64.2/67.8 & 61.3/60.9
+            & 62.9/66.6 \\
+
+        NPR~\cite{tan2024rethinking}
+            & 70.4/71.0 & 64.9/70.9 & 66.8/72.4
+            & 77.4/73.1 & 79.0/65.3 & 71.2/70.5
+            & 90.4/85.1 & 75.7/\underline{\Huge 76.9} & 84.1/88.3
+            & 65.5/70.1 & 62.4/68.0 & 73.0/71.6
+            & 73.4/73.6 \\
+
+        TruFor \cite{guillaro2023trufor}
+            & 75.0/71.0 & 84.9/70.4 & 71.2/\underline{\Huge 76.8}
+            & 83.4/63.1 & 82.0/65.6 & 78.5/82.4
+            & 90.4/65.5 & 65.7/66.9 & 85.1/\underline{\Huge 89.3}
+            & 69.4/74.2 & 81.3/79.5 & 72.8/75.0
+            & 78.3/73.3 \\
+
+        D$^3$~\cite{yang2025d}
+            & 75.0/\underline{\Huge 76.0} & 84.9/\underline{\Huge 75.4} & 68.4/74.2
+            & 88.0/\underline{\Huge 87.1} & \underline{\Huge 92.2}/\underline{\Huge 82.6} & \underline{\Huge 83.2}/81.5
+            & 89.4/\underline{\Huge 90.5} & \underline{\Huge 79.7}/\underline{\Huge 76.9} & 85.7/\textbf{\Huge 93.3}
+            & 72.1/\underline{\Huge 78.9} & 79.4/77.2 & 70.3/\underline{\Huge 76.5}
+            & 80.7/\underline{\Huge 80.8} \\
+
+        ManTraNet \cite{wu2019mantra}
+            & \underline{\Huge 78.1}/67.0 & \underline{\Huge 88.9}/63.3 & \underline{\Huge 73.5}/70.2
+            & \underline{\Huge 89.0}/61.1 & 85.7/64.7 & 81.2/\underline{\Huge 88.4}
+            & \underline{\Huge 93.4}/62.6 & 66.8/66.5 & \underline{\Huge 87.9}/85.3
+            & \underline{\Huge 72.4}/77.1 & \underline{\Huge 83.5}/\underline{\Huge 81.2} & \underline{\Huge 75.8}/73.5
+            & \underline{\Huge 81.3}/71.7 \\
+
+        \rowcolor{mygray}
+        \textbf{HexMIL (Ours)}
+            & \textbf{\Huge 91.6}/\textbf{\Huge 86.2} & \textbf{\Huge 99.3}/\textbf{\Huge 97.5} & \textbf{\Huge 88.4}/\textbf{\Huge 92.1}
+            & \textbf{\Huge 97.1}/\textbf{\Huge 93.5} & \textbf{\Huge 98.3}/\textbf{\Huge 96.0} & \textbf{\Huge 94.2}/\textbf{\Huge 91.8}
+            & \textbf{\Huge 98.7}/\textbf{\Huge 96.5} & \textbf{\Huge 90.1}/\textbf{\Huge 80.8} & \textbf{\Huge 90.5}/84.2
+            & \textbf{\Huge 85.1}/\textbf{\Huge 90.3} & \textbf{\Huge 86.4}/\textbf{\Huge 83.0} & \textbf{\Huge 84.2}/\textbf{\Huge 90.0}
+            & \textbf{\Huge 92.0}/\textbf{\Huge 90.2} \\
+
+        \bottomrule
+    \end{tabular}
+    \end{adjustbox}
+    \caption{%
+    Out-of-domain classification performance (AUC\% / F1\%). Comparison of our proposed HexMIL against SOTA methods. Models are trained on a single manipulation type and tested on the others to evaluate cross-domain generalization. Best results are highlighted in bold, second-best are underlined.
+    }
+    \label{tab:ood_cls}
+    \vspace{-1em}
+\end{table*}
+
+\begin{table*}[t]
+    \centering
+    \begin{adjustbox}{width=\textwidth}
+    \renewcommand{\arraystretch}{1.5}
+    \begin{tabular}{L CCCCCCCCCCCC C}
+        \toprule
+        \multicolumn{14}{c}{\textbf{\Huge Out-of-Domain Localization (IoU\,\% / PG\,\%)}} \\
+        \midrule
+        Train set ($\to$) & \multicolumn{3}{c}{{\huge Pix2Pix}} & \multicolumn{3}{c}{{\huge CycleGAN}} & \multicolumn{3}{c}{{\huge DM}} & \multicolumn{3}{c}{{\huge CT-GAN}} & \multirow{2}{*}{Avg} \\
+        Test  ($\to$) & CycleGAN & DM & CT-GAN & Pix2Pix & DM & CT-GAN & Pix2Pix & CycleGAN & CT-GAN & Pix2Pix & CycleGAN & DM & \\
+        \cmidrule(lr){2-4} \cmidrule(lr){5-7} \cmidrule(lr){8-10} \cmidrule(lr){11-13} \cmidrule{14-14}
+
+        HP-FCN \cite{li2019localization}
+            & 14.9/20.8 & 23.1/32.3 & 16.9/21.5 
+            & 26.4/34.0 & 8.8/17.3 & 25.3/29.8 
+            & 35.9/31.2 & 7.2/13.4 & 34.3/28.8 
+            & 11.5/16.3 & 22.7/33.8 & 16.5/16.8 
+            & 20.3/24.7 \\
+
+        MVSS-Net \cite{chen2021image}
+            & \textbf{\Huge 41.1}/60.3 & 33.9/50.6 & \textbf{\Huge 38.5}/\underline{\Huge 63.1} 
+            & 40.8/56.8 & 30.3/43.8 & 38.1/58.9 
+            & 46.2/66.5 & \underline{\Huge 29.3}/45.4 & 46.1/67.4 
+            & \textbf{\Huge 42.7}/56.2 & 33.1/49.9 & \underline{\Huge 37.3}/59.1 
+            & \underline{\Huge 38.1}/56.5 \\
+
+        TruFor \cite{guillaro2023trufor}
+            & 34.4/62.8 & 35.1/63.2 & 33.7/57.8 
+            & 37.8/71.0 & \underline{\Huge 35.5}/\underline{\Huge 65.6} & 38.2/69.2 
+            & \textbf{\Huge 53.9}/80.7 & 19.5/\underline{\Huge 47.8} & \textbf{\Huge 49.7}/\textbf{\Huge 83.7} 
+            & 31.4/60.3 & 37.7/62.9 & 32.4/58.7 
+            & 36.6/65.3 \\
+
+        ManTraNet \cite{wu2019mantra}
+            & 38.2/\textbf{\Huge 67.2} & \underline{\Huge 43.7}/\underline{\Huge 69.0} & 33.7/\underline{\Huge 63.1} 
+            & \underline{\Huge 41.4}/\underline{\Huge 71.9} & 33.9/63.7 & \underline{\Huge 42.4}/\textbf{\Huge 73.7} 
+            & 50.4/\underline{\Huge 83.5} & 10.6/33.0 & 47.9/\underline{\Huge 81.9} 
+            & 34.3/\textbf{\Huge 65.5} & \textbf{\Huge 44.5}/\underline{\Huge 71.2} & 34.9/\textbf{\Huge 66.0} 
+            & 38.0/\underline{\Huge 67.5} \\
+
+        \rowcolor{mygray}
+        \textbf{HexMIL (Ours)}
+            & \underline{\Huge 40.0}/\underline{\Huge 66.1} & \textbf{\Huge 46.7}/\textbf{\Huge 75.6} & \underline{\Huge 37.8}/\textbf{\Huge 63.4}
+            & \textbf{\Huge 47.1}/\textbf{\Huge 77.0} & \textbf{\Huge 44.1}/\textbf{\Huge 70.7} & \textbf{\Huge 43.5}/\underline{\Huge 73.2}
+            & \underline{\Huge 50.7}/\textbf{\Huge 84.8} & \textbf{\Huge 31.7}/\textbf{\Huge 55.5} & \underline{\Huge 49.2}/81.1
+            & \underline{\Huge 36.4}/\underline{\Huge 62.5} & \underline{\Huge 42.1}/\textbf{\Huge 78.4} & \textbf{\Huge 38.9}/\underline{\Huge 64.0}
+            & \textbf{\Huge 42.4}/\textbf{\Huge70.6}\\
+
+        \bottomrule
+    \end{tabular}
+    \end{adjustbox}
+    \caption{%
+    Out-of-domain localization performance (IoU\% / PG\%). Evaluation of spatial grounding robustness on unseen manipulation types. HexMIL consistently outperforms baseline approaches in cross-domain scenarios.
+    }
+    \label{tab:ood_loc}
+    \vspace{-1em}
+\end{table*}
+
+\smallskip
+\noindent\textbf{Out-of-domain classification across generators.}
+\Cref{tab:ood_cls} shows the results obtained by \textbf{HexMIL} and all the baselines in the various out-of-domain classification scenarios. The results show a clear hierarchy but also a significant structure among the strongest baselines. HexMIL achieves the best overall classification performance (92.0 AUC / 90.2 F1), winning all AUC transfer directions and almost all F1 directions, which indicates robust cross-generator generalization rather than gains limited to a few favorable pairs. Relative to the strongest baseline averages (81.3 AUC and 80.8 F1), this corresponds to absolute gains of +10.7 and +9.4 points (approximately +13.2\% and +11.6\% relative improvement, respectively). At the same time, baselines show distinct strengths: ManTraNet is the best model among the baselines in terms of average AUC (81.3) but with a substantially lower average F1 (71.7), suggesting a strong ranking capability with weaker calibration under shift; D3 achieves the second-best average F1 score (80.8) with an equally high AUC (80.7), but its performance is less uniform across transfer directions, indicating a residual dependence on specific generation artifacts; NPR is also competitive, especially in various DM-trained transfers, however, it remains unstable in the most challenging cross-domain cases. This confirms that the gap is not due to universally weak competitors, but to their difficulty in maintaining both the separability and the stability of the threshold thru heterogeneous manipulations.
+
+\smallskip
+\noindent\textbf{Localization results.}
+The localization results in \Cref{tab:ood_loc} are particularly relevant because out-of-domain (ood) localization is generally more fragile compared to ood classification. Even in this context, HexMIL, despite not being trained in the localization of the manipulated volume within CT scans, achieves the best average ood localization performance (42.4 IoU / 70.6 PG) and leads in most transfer cells, while the stronger baselines optimize different and often complementary behaviors. MVSS-Net and ManTraNet are almost equal in average IoU (38.1 vs. 38.0), but ManTraNet produces the highest non-HexMIL PG (67.5), consistent with sharper anomaly peaks; TruFor remains competitive overall (36.6/65.3) and is particularly strong in some transfers from diffusion to GAN, but it degrades significantly in others, revealing a sensitivity to joint changes in appearance and forensic residual statistics. Taken together, these results suggest that previous methods are typically strong along one axis at a time (classification, calibration, overlap, or pointing), while HexMIL is consistently strong across all axes. A plausible explanation is architectural: instead of a 2D slice-level evaluation followed by a late aggregation, HexMIL performs a 3D hierarchical aggregation of evidence with ante-hoc attention, preserving the inter-slice context and producing localization maps that are directly linked to the prediction mechanism.
+
+\subsection{Analysis}
+
+% \noindent\textbf{Robustness.}
+
+\noindent\textbf{Interpretability.}
+We evaluate HexMIL's spatial explanations against two post-hoc attribution baselines---Grad-CAM~\cite{selvaraju2017grad} and \\Grad-CAM++~\cite{chattopadhay2018grad}---applied to the same model having ResNet-50 as Patch Encoder and trained in a in-domain scenario. \Cref{fig:xai}~(a) shows a qualitative analysis of the three methods. All methods successfully identify the manipulated area. The HexMIL heatmap focuses attention compactly on the region outlined by the ground truth bounding box, while Grad-CAM and Grad-CAM++ produce a slightly more diffuse map. The quantitative results shown in \Cref{fig:xai}~(b) highlight the true difference between the methods. The high pixel AUC values—Grad-CAM 96.6, Grad-CAM++ 97.8, and HexMIL 98.4—reflect what has actually emerged qualitatively, namely the good ability to discriminate the manipulated region from the background. Despite the similar pixel AUC values, significant differences between the methods emerge with the Pointing Game (PG) metric. Grad-CAM achieves the lowest value (82.6 PG), showing its difficulties in identifying the most salient pixel in the manipulated region. A different story occurs for Grad-CAM++ and HexMIL, which with values of 91.5~PG and 92.6~PG respectively, prove to be skilled in this task. The difference between these two methods emerges in the IoU-vs-threshold curve.
+
+\begin{figure}
+    \centering
+    \includegraphics[width=\linewidth]{pictures/medforensics-xai_iou.png}
+    \caption{(a) Qualitative localization on manipulated CT slices (green boxes: ground truth), comparing our ante-hoc attention against post-hoc methods (Grad-CAM, Grad-CAM++) applied to the same \textbf{HexMIL} model. (b) Quantitative evaluation using IoU (c), Pixel AUC, and Pointing Game."
+    }
+    \label{fig:xai}
+\end{figure}
+
+\noindent\textbf{Ablation Studies.}
+We ablate \textbf{HexMIL} along three axes: architectural components (Table~\ref{tab:abl_components}), attention mechanism (Table~\ref{tab:abl_attention}), and patch-encoder design (Table~\ref{tab:abl_stage1}). All results are reported on the out-of-domain test scenario. Two internal baselines serve as anchors throughout. \textit{ResNet50-ABMIL} applies a ResNet-50 slice-by-slice with global average pooling and max-pools per-slice scores into a single volume prediction — no MIL, no hierarchy. \textit{Pool-MIL} is structurally identical to HexMIL but replaces gated attention with mean pooling at \emph{both} aggregation levels, isolating the attention contribution from the two-stage design.
+
+\smallskip
+\noindent\textit{Architectural components (Table~\ref{tab:abl_components}).}
+The two-stage MIL hierarchy is the single largest contributor: switching from Flat-CNN to Pool-MIL alone yields $+9.6$ AUC and $+13.3$ F1, confirming that the ability to selectively weight patches within a slice and slices within a volume is critical, independently of whether the aggregation uses attention or pooling. Introducing gated attention adds a further $+11.8$ AUC, demonstrating that mean pooling under-exploits the non-uniform distribution of manipulation artefacts across slices. Sinusoidal positional encoding contributes an additional $+5.3$ AUC ($86.7 \to 92.0$), which we attribute to the model learning that certain Z-ranges are anatomically more susceptible to specific manipulation patterns.
+
+\begin{table}[t]
+    \centering
+    \begin{adjustbox}{width=\columnwidth}
+    \renewcommand{\arraystretch}{1.3}
+    \newcommand{\cmark}{\textcolor{green!55!black}{$\checkmark$}}%
+    \newcommand{\xmark}{\textcolor{red!70!black}{$\times$}}%
+    \begin{tabular}{l cccc cc}
+        \toprule
+        Model & MIL & 2-stage & Gated & Pos.\,Enc. & ood AUC\,(\%) & ood F1\,(\%) \\
+        \midrule
+        Flat-CNN         & \xmark & \xmark & \xmark & \xmark & 65.3 & 63.7 \\
+        Pool-MIL         & \cmark & \cmark & \xmark & \xmark & 74.9 & 77.0 \\
+        HexMIL (No PE)   & \cmark & \cmark & \cmark & \xmark & 86.7 & 84.1 \\
+        \rowcolor{mygray}
+        \textbf{HexMIL}  & \cmark & \cmark & \cmark & \cmark & 92.0 & 90.2 \\
+        \bottomrule
+    \end{tabular}
+    \end{adjustbox}
+    \caption{%
+    Architectural ablation. Impact of progressively adding key components on out-of-domain classification.   \colorbox{mygray}{Grey}: selected configuration.
+    }
+    \label{tab:abl_components}
+\end{table}
+
+\begin{table}[t]
+    \centering
+    \renewcommand{\arraystretch}{1.2}
+    \begin{tabular}{l cc cc}
+        \toprule
+        & \multicolumn{2}{c}{Ood Classification} & \multicolumn{2}{c}{Ood Localization} \\
+        \cmidrule(lr){2-3} \cmidrule(lr){4-5}
+        Attention type & AUC\,(\%) & F1\,(\%) & IoU\,(\%) & PG\,(\%) \\
+        \midrule
+        Standard        & 76.4 & 74.0 & 35.7 & 49.1 \\
+        Self-Attention  & 93.5 & 91.2 & 1.6 &  6.0  \\
+        \rowcolor{mygray}
+        \textbf{Gated}   & \textbf{92.0} & \textbf{90.2} & \textbf{42.4} & \textbf{70.6} \\
+        \bottomrule
+    \end{tabular}
+    \caption{
+    Attention mechanism ablation. Comparison of different attention types on classification and localization performance.
+    \colorbox{mygray}{Grey}: selected configuration.   }
+    \label{tab:abl_attention}
+\end{table}
+
+\smallskip
+\noindent\textit{Attention mechanism (Table~\ref{tab:abl_attention}).}
+We compare three aggregation strategies keeping backbone, patch size and window size fixed ($P\!=\!64$, ResNet-50, $K\!=\!32$). Standard attention\cite{bahdanau2014neural} performs poorly on both classification ($76.4$ AUC) and localisation ($35.7$ IoU, $49.1$ PG), suggesting that the sigmoid gating in Eq.~\eqref{eq:gated_attn} is essential to suppress the majority of uninformative patches that dominate CT volumes.
+Self-attention nearly matches gated attention on classification ($93.5$ vs.\ $92.0$ AUC) but suffers a catastrophic collapse on localisation: IoU drops from $42.4\,\%$ to $1.6\,\%$ and the pointing game score from $70.6\,\%$ to $6.0\,\%$. This is a direct consequence of the global key--query mixing in self-attention: once patch representations are blended across the entire sequence, the one-to-one correspondence between attention weights and spatial locations is destroyed, and the resulting heatmap $\hat{\mathcal{H}}_{3D}$ loses all geometric meaning (\Cref{fig:ga_vs_sa}. Gated attention is the only mechanism that achieves competitive classification and interpretable localisation simultaneously, precisely because each weight $\alpha_n$ (resp.\ $\beta_k$) retains an unambiguous spatial identity. 
+ 
+
+\begin{figure}
+    \centering
+    \includegraphics[width=\columnwidth]{pictures/ga_vs_sa.png}
+    \caption{Visual comparison of Gated (GA, top) and Self-Attention (SA, bottom) maps. Green boxes denote ground truth manipulations.}
+    \label{fig:ga_vs_sa}
+\end{figure}
+
+\begin{table}[t]
+    \centering
+    \begin{adjustbox}{width=\columnwidth}
+    \renewcommand{\arraystretch}{1}
+    \begin{tabular}{l cc cccc}
+        \toprule
+        & & \multicolumn{2}{c}{Ood Classification} & \multicolumn{2}{c}{Ood Localization} \\
+        \cmidrule(lr){3-4} \cmidrule(lr){5-6}
+        Backbone & $P$ & AUC\,(\%) & F1\,(\%) & IoU\,(\%) & PG\,(\%)\\
+        \midrule
+        DenseNet-121    & 32  & 84.2 & 87.0 & 43.2 & 73.4 \\
+        DenseNet-121    & 64  & 90.9 & 88.3 & 40.8 & 70.1 \\
+        DenseNet-121    & 128 & 91.1 & 89.0 & 28.4 & 67.6 \\
+        \midrule
+        EfficientNet-B0 & 32  & 81.6 & 85.2 & 42.3 & 62.1 \\
+        EfficientNet-B0 & 64  & 87.2 & 88.9 & 39.0 & 59.4 \\
+        EfficientNet-B0 & 128 & 89.1 & 86.4 & 36.9 & 50.0 \\
+        \midrule
+        ResNet-50       & 32  & 88.2 & 90.0 & 44.1 & 69.2 \\
+        \rowcolor{mygray}
+        \textbf{ResNet-50} & \textbf{64} & \textbf{92.0} & \textbf{90.2} & \textbf{42.4} & \textbf{70.6} \\
+        ResNet-50      & 128 & 93.1 & 90.9 & 37.2 & 68.5 \\
+        \bottomrule
+    \end{tabular}
+    \end{adjustbox}
+    \caption{%
+     Backbone and hyperparameter ablation." Out-of-domain performance across different feature extractors and values of $P$. Grey denotes the selected configuration.        \colorbox{mygray}{Grey}: selected configuration.
+    }
+    \label{tab:abl_stage1}
+\end{table}
+
+\smallskip
+\noindent\textit{Patch-encoder design (Table~\ref{tab:abl_stage1}).}
+ResNet-50 is the best backbone at every patch size, outperforming DenseNet-121 and EfficientNet-B0 by up to $3.8$ AUC ($92.0$ vs.\ $88.2$ at $P\!=\!64$). The patch size reveals a fundamental trade-off between classification and localisation: $P\!=\!128$ attains the highest OOD AUC ($93.1$) but the worst IoU ($37.2\,\%$), while $P\!=\!32$ improves IoU ($44.1\,\%$) at the cost of classification ($88.2$ AUC). We select $P\!=\!64$ as the operating point that best balances the two objectives ($92.0$ AUC, $42.4\,\%$ IoU). The degradation in localisation at large $P$ is expected: coarser patches produce a sparser attention grid, reducing the spatial resolution of $\hat{\mathcal{H}}_{3D}$ and making it harder to cover compact manipulation regions precisely.
+
+\section{Conclusion \& Limitations}
+\label{sec:conclusion}
+We presented \textbf{HexMIL}, a hierarchical MIL framework that jointly addresses out-of-domain generalization and ante-hoc 3D spatial attribution for CT manipulation detection, trained with binary volume-level labels only. Across a rigorous leave-one-generator-out protocol, HexMIL outperforms all baselines by $+10.7$ AUC and $+9.4$ F1 in classification and achieves the best average IoU and PG in localization without any spatial supervision.
+\textbf{Limitations.} Fixed-length windowing may bisect manipulation regions in long scans; an overlapping or adaptive strategy could mitigate this. Generalization to anatomical sites beyond the thorax and to other modalities (e.g., MRI) remains to be verified.
+
+
+
+%%
+%% The acknowledgments section is defined using the "acks" environment
+%% (and NOT an unnumbered section). This ensures the proper
+%% identification of the section in the article metadata, and the
+%% consistent spelling of the heading.
+
+\begin{acks}
+
+\end{acks}
+
+%%
+%% The next two lines define the bibliography style to be used, and
+%% the bibliography file.
+\bibliographystyle{ACM-Reference-Format}
+\bibliography{main}
+
+
+%%
+%% If your work has an appendix, this is the place to put it.
+% \appendix
+
+% \section{Appendix A}
+
+
+\end{document}
+\endinput
+%%
+%% End of file `sample-sigconf-authordraft.tex'.

@@ -1,0 +1,40 @@
+# =============================================================================
+#  TensorFlow baselines — requirements
+#  Env: medsota-tf-cu122  (Python 3.11)
+#
+#  Scripts covered:
+#      train_hp_fcn.py    — HP-FCN (tf-slim ResNet-V2, git_repo/Deep_inpainting_localization)
+#      train_mantranet.py — ManTraNet (tf.keras, git_repo/ManTraNet)
+#
+#  Why a separate env: TensorFlow does not support Python 3.14 (medsota).
+#  On this host (driver 535.x, CUDA 12.2), TensorFlow 2.15.1 + CUDA 12.2
+#  pip wheels is the GPU-compatible configuration.
+#
+#  Create env:
+#      conda create -n medsota-tf-cu122 python=3.11 -y
+#
+#  NOTE: 'conda run -n medsota-tf-cu122' is broken on this machine.
+#  Use the direct interpreter path for all install and run commands:
+#      /home/opontorno/miniconda3/envs/medsota-tf-cu122/bin/pip install -r baselines/requirements_tensorflow.txt
+#      /home/opontorno/miniconda3/envs/medsota-tf-cu122/bin/python baselines/train_hp_fcn.py ...
+#      /home/opontorno/miniconda3/envs/medsota-tf-cu122/bin/python baselines/train_mantranet.py ...
+# =============================================================================
+
+# ── TensorFlow ecosystem ──────────────────────────────────────────────────────
+tensorflow[and-cuda]==2.15.1  # pinned for CUDA 12.2 driver compatibility on this host
+tf-slim                     # train_hp_fcn — ResNet-V2 backbone (tf.contrib.slim replacement)
+
+# ── Data / pretrained weights ─────────────────────────────────────────────────
+h5py                        # train_mantranet — loads ManTraNet_Ptrain4.h5 pretrained weights
+
+# ── Scientific computing ──────────────────────────────────────────────────────
+numpy
+scipy                       # sigmoid for score aggregation
+scikit-learn                # roc_auc_score, accuracy_score, f1_score, average_precision_score
+scikit-image                # train_hp_fcn — skimage.transform.resize to resize CT slices
+
+# ── Data handling ─────────────────────────────────────────────────────────────
+pandas                      # hexmil.data.patch_dataset / slice_dataset (transitive dep)
+
+# ── Utilities ─────────────────────────────────────────────────────────────────
+tqdm

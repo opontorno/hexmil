@@ -1,0 +1,86 @@
+# =============================================================================
+#  Baselines — training commands (queue with tsp)
+#  cd /home/opontorno/projects/hexmil  before running
+#  GPU auto-selected (most free memory); pass --gpu_id N to pin a specific one
+#
+#  PyTorch baselines → conda env: medsota
+#       conda run -n medsota pip install -r baselines/requirements_pytorch.txt
+#
+#  TF baselines      → conda env: medsota-tf-cu122  (Python 3.11)
+#      NOTE: 'conda run -n medsota-tf-cu122' is broken on this machine.
+#            Use the full interpreter path as shown below.
+#      Host driver is 535.x (CUDA 12.2), so use the CUDA-12.2-compatible env.
+#      /home/opontorno/miniconda3/envs/medsota-tf-cu122/bin/pip install -r baselines/requirements_tensorflow.txt
+# =============================================================================
+
+# ─── TruFor  [env: medsota] ──────────────────────────────────────────────────
+tsp /home/opontorno/miniconda3/envs/medsota/bin/python baselines/train_trufor.py --train_mods pix2pix
+tsp /home/opontorno/miniconda3/envs/medsota/bin/python baselines/train_trufor.py --train_mods cycle
+tsp /home/opontorno/miniconda3/envs/medsota/bin/python baselines/train_trufor.py --train_mods diffusion
+
+# ─── MVSS-Net  [env: medsota] ────────────────────────────────────────────────
+tsp /home/opontorno/miniconda3/envs/medsota/bin/python baselines/train_mvssnet.py --train_mods pix2pix
+tsp /home/opontorno/miniconda3/envs/medsota/bin/python baselines/train_mvssnet.py --train_mods cycle
+tsp /home/opontorno/miniconda3/envs/medsota/bin/python baselines/train_mvssnet.py --train_mods diffusion
+
+# ─── 3D-ResNet (R3D-18)  [env: medsota] ─────────────────────────────────────
+tsp /home/opontorno/miniconda3/envs/medsota/bin/python baselines/train_3d_resnet.py --data_dir /mnt/lguarnera_group/opontorno/med_datasets/M3DSynth --out_dir baselines/runs/3d_resnet/trained_on_pix2pix    --train_mods pix2pix
+tsp /home/opontorno/miniconda3/envs/medsota/bin/python baselines/train_3d_resnet.py --data_dir /mnt/lguarnera_group/opontorno/med_datasets/M3DSynth --out_dir baselines/runs/3d_resnet/trained_on_cycle       --train_mods cycle
+tsp /home/opontorno/miniconda3/envs/medsota/bin/python baselines/train_3d_resnet.py --data_dir /mnt/lguarnera_group/opontorno/med_datasets/M3DSynth --out_dir baselines/runs/3d_resnet/trained_on_diffusion   --train_mods diffusion
+
+# ─── 3D-DenseNet  [env: medsota] ─────────────────────────────────────────────
+tsp /home/opontorno/miniconda3/envs/medsota/bin/python baselines/train_3d_densenet.py --data_dir /mnt/lguarnera_group/opontorno/med_datasets/M3DSynth --out_dir baselines/runs/3d_densenet/trained_on_pix2pix    --train_mods pix2pix
+tsp /home/opontorno/miniconda3/envs/medsota/bin/python baselines/train_3d_densenet.py --data_dir /mnt/lguarnera_group/opontorno/med_datasets/M3DSynth --out_dir baselines/runs/3d_densenet/trained_on_cycle       --train_mods cycle
+tsp /home/opontorno/miniconda3/envs/medsota/bin/python baselines/train_3d_densenet.py --data_dir /mnt/lguarnera_group/opontorno/med_datasets/M3DSynth --out_dir baselines/runs/3d_densenet/trained_on_diffusion   --train_mods diffusion
+
+# ─── 3D-EfficientNet  [env: medsota] ─────────────────────────────────────────
+tsp /home/opontorno/miniconda3/envs/medsota/bin/python baselines/train_3d_efficientnet.py --data_dir /mnt/lguarnera_group/opontorno/med_datasets/M3DSynth --out_dir baselines/runs/3d_efficientnet/trained_on_pix2pix    --train_mods pix2pix
+tsp /home/opontorno/miniconda3/envs/medsota/bin/python baselines/train_3d_efficientnet.py --data_dir /mnt/lguarnera_group/opontorno/med_datasets/M3DSynth --out_dir baselines/runs/3d_efficientnet/trained_on_cycle       --train_mods cycle
+tsp /home/opontorno/miniconda3/envs/medsota/bin/python baselines/train_3d_efficientnet.py --data_dir /mnt/lguarnera_group/opontorno/med_datasets/M3DSynth --out_dir baselines/runs/3d_efficientnet/trained_on_diffusion   --train_mods diffusion
+
+# ─── Flat-CNN (ResNet-50 2D)  [env: medsota] ─────────────────────────────────
+tsp /home/opontorno/miniconda3/envs/medsota/bin/python baselines/train_flat_cnn.py --train_mods pix2pix
+tsp /home/opontorno/miniconda3/envs/medsota/bin/python baselines/train_flat_cnn.py --train_mods cycle
+tsp /home/opontorno/miniconda3/envs/medsota/bin/python baselines/train_flat_cnn.py --train_mods diffusion
+
+# ─── Pool-MIL  [env: medsota] ────────────────────────────────────────────────
+tsp /home/opontorno/miniconda3/envs/medsota/bin/python baselines/train_pool_mil.py --train_mods pix2pix
+tsp /home/opontorno/miniconda3/envs/medsota/bin/python baselines/train_pool_mil.py --train_mods cycle
+tsp /home/opontorno/miniconda3/envs/medsota/bin/python baselines/train_pool_mil.py --train_mods diffusion
+
+# ─── ViT-ABMIL  [env: medsota] ───────────────────────────────────────────────
+tsp /home/opontorno/miniconda3/envs/medsota/bin/python baselines/train_vit_abmil.py --data_dir /mnt/lguarnera_group/opontorno/med_datasets/M3DSynth --out_dir baselines/runs/vit_abmil/trained_on_pix2pix    --train_mods pix2pix
+tsp /home/opontorno/miniconda3/envs/medsota/bin/python baselines/train_vit_abmil.py --data_dir /mnt/lguarnera_group/opontorno/med_datasets/M3DSynth --out_dir baselines/runs/vit_abmil/trained_on_cycle       --train_mods cycle
+tsp /home/opontorno/miniconda3/envs/medsota/bin/python baselines/train_vit_abmil.py --data_dir /mnt/lguarnera_group/opontorno/med_datasets/M3DSynth --out_dir baselines/runs/vit_abmil/trained_on_diffusion   --train_mods diffusion
+
+# ─── NPR  [env: medsota] ─────────────────────────────────────────────────────
+tsp /home/opontorno/miniconda3/envs/medsota/bin/python baselines/train_npr.py --train_mods pix2pix
+tsp /home/opontorno/miniconda3/envs/medsota/bin/python baselines/train_npr.py --train_mods cycle
+tsp /home/opontorno/miniconda3/envs/medsota/bin/python baselines/train_npr.py --train_mods diffusion
+
+# ─── FreqNet  [env: medsota] ─────────────────────────────────────────────────
+tsp /home/opontorno/miniconda3/envs/medsota/bin/python baselines/train_freqnet.py --train_mods pix2pix
+tsp /home/opontorno/miniconda3/envs/medsota/bin/python baselines/train_freqnet.py --train_mods cycle
+tsp /home/opontorno/miniconda3/envs/medsota/bin/python baselines/train_freqnet.py --train_mods diffusion
+
+# ─── D3  [env: medsota] ──────────────────────────────────────────────────────
+tsp /home/opontorno/miniconda3/envs/medsota/bin/python baselines/train_d3.py --train_mods pix2pix
+tsp /home/opontorno/miniconda3/envs/medsota/bin/python baselines/train_d3.py --train_mods cycle
+tsp /home/opontorno/miniconda3/envs/medsota/bin/python baselines/train_d3.py --train_mods diffusion
+
+# ─── DeepFeatureX  [env: medsota] ────────────────────────────────────────────
+tsp /home/opontorno/miniconda3/envs/medsota/bin/python baselines/train_deepfeaturex.py --train_mods pix2pix
+tsp /home/opontorno/miniconda3/envs/medsota/bin/python baselines/train_deepfeaturex.py --train_mods cycle
+tsp /home/opontorno/miniconda3/envs/medsota/bin/python baselines/train_deepfeaturex.py --train_mods diffusion
+
+# ─── HP-FCN  [env: medsota-tf-cu122] ──
+# Force sequential GPU execution for TF jobs (ManTraNet can fail if launched in parallel).
+tsp -S 1
+tsp /home/opontorno/miniconda3/envs/medsota-tf-cu122/bin/python baselines/train_hp_fcn.py --train_mods pix2pix
+tsp /home/opontorno/miniconda3/envs/medsota-tf-cu122/bin/python baselines/train_hp_fcn.py --train_mods cycle
+tsp /home/opontorno/miniconda3/envs/medsota-tf-cu122/bin/python baselines/train_hp_fcn.py --train_mods diffusion
+
+# ─── ManTraNet  [env: medsota-tf-cu122] ─
+tsp /home/opontorno/miniconda3/envs/medsota-tf-cu122/bin/python baselines/train_mantranet.py --train_mods pix2pix
+tsp /home/opontorno/miniconda3/envs/medsota-tf-cu122/bin/python baselines/train_mantranet.py --train_mods cycle
+tsp /home/opontorno/miniconda3/envs/medsota-tf-cu122/bin/python baselines/train_mantranet.py --train_mods diffusion
