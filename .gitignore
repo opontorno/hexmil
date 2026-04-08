@@ -4,6 +4,7 @@ baselines/git_repo/*
 results/
 runs/
 CL*.md
+cl*.md
 *tmp*
 *.egg-info
 wandb/
