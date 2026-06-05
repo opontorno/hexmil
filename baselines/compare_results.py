@@ -20,6 +20,11 @@ Supported run-directory patterns
   d3_K{K}                                → slice + volume rows
   deepfeaturex_K{K}                      → slice + volume rows
   3d_resnet | 3d_densenet | 3d_efficientnet  → volume row (K from args.json)
+  3d_swin[_*]                             → volume row (K from args.json)
+  3d_vit[_*]                              → volume row; arch+variant from args.json
+                                            (variant=plain → model=3d_vit,
+                                             variant=factorised → model=vivit_f)
+  3d_mvit[_*]                             → volume row; arch from args.json
   hp_fcn_K{K}                            → volume row
   trufor_K{K}                            → volume row
   trufor_mitb2_K{K}                      → volume row
@@ -70,13 +75,17 @@ _MODEL_ORDER = {
     "3d_resnet":        8,
     "3d_densenet":      9,
     "3d_efficientnet": 10,
-    "hp_fcn":          11,
-    "trufor":          12,
-    "trufor_mitb2":    13,
-    "trufor_full":     14,
-    "mvssnet":         15,
-    "mvssnet_full":    16,
-    "mantranet":       17,
+    "3d_swin":         11,
+    "3d_vit":          12,
+    "vivit_f":         13,
+    "3d_mvit":         14,
+    "hp_fcn":          15,
+    "trufor":          16,
+    "trufor_mitb2":    17,
+    "trufor_full":     18,
+    "mvssnet":         19,
+    "mvssnet_full":    20,
+    "mantranet":       21,
 }
 
 # ── Run-directory name parsers ─────────────────────────────────────────────────
@@ -93,6 +102,9 @@ _DFX_RE           = re.compile(r"^deepfeaturex_K(?P<K>\d+)$")
 _3D_RESNET_RE     = re.compile(r"^3d_resnet$")
 _3D_DENSENET_RE   = re.compile(r"^3d_densenet$")
 _3D_EFFICIENTNET_RE = re.compile(r"^3d_efficientnet$")
+_3D_SWIN_RE       = re.compile(r"^3d_swin(?:_.+)?$")
+_3D_VIT_RE        = re.compile(r"^3d_vit(?:_.+)?$")
+_3D_MVIT_RE       = re.compile(r"^3d_mvit(?:_.+)?$")
 _HPFCN_RE         = re.compile(r"^hp_fcn_K(?P<K>\d+)$")
 _TRUFOR_RE        = re.compile(r"^trufor_K(?P<K>\d+)$")
 _TRUFOR_MITB2_RE  = re.compile(r"^trufor_mitb2_K(?P<K>\d+)$")
@@ -423,6 +435,71 @@ def _collect_3d_efficientnet(run_dir: Path) -> list[dict]:
     )
 
 
+def _collect_3d_swin(run_dir: Path) -> list[dict]:
+    """3d_swin[_*] → volume row (Swin3D-T)."""
+    return _collect_volume_flat(
+        run_dir, _3D_SWIN_RE,
+        model    = "3d_swin",
+        arch_fn  = lambda _: "Swin3D-T",
+        backbone = None,
+    )
+
+
+def _collect_3d_vit(run_dir: Path) -> list[dict]:
+    """3d_vit[_*] → volume row.
+
+    Reads variant from args.json to route to the correct model key:
+      variant=plain       → model=3d_vit,  arch=ViT3D-{arch}
+      variant=factorised  → model=vivit_f, arch=ViViT-F-{arch}
+    """
+    if not _3D_VIT_RE.match(run_dir.name):
+        return []
+    rows = []
+    for sub in sorted(run_dir.iterdir()):
+        if not sub.is_dir():
+            continue
+        mp = _find_metrics(sub)
+        if mp is None:
+            continue
+        d    = json.loads(mp.read_text())
+        args = _load_args(sub)
+        variant  = args.get("variant", "plain")
+        arch_key = args.get("arch", "vit3d_base")
+        K        = args.get("K")
+        if variant == "factorised":
+            model    = "vivit_f"
+            arch_str = f"ViViT-F-{arch_key}"
+        else:
+            model    = "3d_vit"
+            arch_str = f"ViT3D-{arch_key}"
+        block = d
+        if "volume" in d and isinstance(d["volume"], dict) and "auc" in d.get("volume", {}):
+            block = d["volume"]
+        row = dict(
+            model      = model,
+            arch       = arch_str,
+            stage      = "volume",
+            K          = K,
+            pool_mode  = None,
+            vol_agg    = None,
+            backbone   = None,
+            trained_on = _trained_on(sub.name),
+        )
+        row.update(_cls_row(block))
+        rows.append(row)
+    return rows
+
+
+def _collect_3d_mvit(run_dir: Path) -> list[dict]:
+    """3d_mvit[_*] → volume row (MViT-V2)."""
+    return _collect_volume_flat(
+        run_dir, _3D_MVIT_RE,
+        model    = "3d_mvit",
+        arch_fn  = lambda a: a.get("arch", "mvit_v2_s"),
+        backbone = None,
+    )
+
+
 # ── TF / localization baselines ───────────────────────────────────────────────
 
 def _collect_hp_fcn(run_dir: Path) -> list[dict]:
@@ -643,6 +720,9 @@ _COLLECTORS = [
     _collect_3d_resnet,
     _collect_3d_densenet,
     _collect_3d_efficientnet,
+    _collect_3d_swin,
+    _collect_3d_vit,
+    _collect_3d_mvit,
     _collect_hp_fcn,
     _collect_trufor,
     _collect_trufor_mitb2,

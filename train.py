@@ -1,23 +1,13 @@
 #!/usr/bin/env python
 """
-ABMIL/train.py  —  Full pipeline: slice-cls → volume-cls in one command.
+train.py — Full pipeline: SliceMIL (Stage 1) → HexMIL (Stage 2).
 
-Arguments that differ between stages are prefixed:
-  s_*  → forwarded to train_slice.py   (e.g. --s_epochs, --s_lr)
-  v_*  → forwarded to train_volume.py  (e.g. --v_epochs, --v_K)
+Runs both training stages sequentially with a single command.
+Stage-specific args use the s_* / v_* prefix; shared args are forwarded to both.
 
-Arguments shared across both stages (backbone, patch_size, mods, …)
-are passed once and forwarded unchanged.
-
-The two stages run fully independently:
-  • separate output directories  (slice-cls_* / volume-cls_*)
-  • separate WandB runs
-  • separate champion/challenger promotion
-  • separate checkpoints
-
-For single-stage training use the original scripts directly:
-  python train_slice.py  ...
-  python train_volume.py ...
+For single-stage training use the individual scripts:
+  python train_slicemil.py ...
+  python train_hexmil.py ...
 """
 
 import argparse
@@ -26,7 +16,7 @@ import sys
 from pathlib import Path
 
 from config import WORK_DIR
-ALL_FAKES = ['pix2pix', 'cycle', 'diffusion']
+ALL_FAKES = ['pix2pix', 'cycle', 'diffusion', 'ctgan']
 HERE      = Path(__file__).parent        # experiments/ABMIL/
 
 
@@ -44,7 +34,8 @@ def build_parser() -> argparse.ArgumentParser:
     sh = p.add_argument_group("Shared  (forwarded to both stages)")
     sh.add_argument("--backbone",    default="resnet50",
                     choices=["resnet50", "resnet34",
-                             "efficientnet_b0", "efficientnet_b4", "densenet121"])
+                             "efficientnet_b0", "efficientnet_b4", "densenet121",
+                             "vit_base", "clip"])
     sh.add_argument("--mods",        nargs="+", default=None,
                     help="Fake modalities to train on (default: all three)")
     sh.add_argument("--patch_size",  type=int,  default=64)
@@ -61,7 +52,7 @@ def build_parser() -> argparse.ArgumentParser:
                     help="Force a specific GPU (default: auto-select)")
 
     # ── Slice stage ───────────────────────────────────────────────────────────
-    sl = p.add_argument_group("Slice stage  [s_ prefix → train_slice.py]")
+    sl = p.add_argument_group("Slice stage  [s_ prefix → train_slicemil.py]")
     sl.add_argument("--s_attn_dim",       type=int,   default=128)
     sl.add_argument("--s_dropout",        type=float, default=0.25)
     sl.add_argument("--s_epochs",         type=int,   default=50)
@@ -73,21 +64,22 @@ def build_parser() -> argparse.ArgumentParser:
     sl.add_argument("--s_scheduler",      action="store_true", default=False,
                     help="Enable ReduceLROnPlateau for slice stage")
     sl.add_argument("--s_vis_every",      type=int,   default=5)
-    sl.add_argument("--s_vis_n_samples",  type=int,   default=8)
     sl.add_argument("--s_run_name",       default=None,
                     help="Custom run-name for the slice stage")
     # ABMIL-specific slice args
-    sl.add_argument("--aux_attn_loss",    action="store_true", default=False,
+    sl.add_argument("--aux_attn_loss",       action="store_true", default=False,
                     help="Guide ABMIL α with GT mask coverage (KL loss)")
-    sl.add_argument("--aux_weight",       type=float, default=0.5,
+    sl.add_argument("--aux_weight",          type=float, default=0.5,
                     help="Weight λ of the auxiliary KL attention loss")
-    sl.add_argument("--use_fourier",      action="store_true", default=False,
-                    help="Enable FA-ABMIL Fourier magnitude branch")
-    sl.add_argument("--fourier_feat_dim", type=int,   default=256)
+    # Slice neighbourhood selection
+    sl.add_argument("--neighborhood_radius", type=int, default=5,
+                    help="Half-width of the window around coord_z (default: 5)")
+    sl.add_argument("--neighborhood_slices", type=int, default=4,
+                    help="Extra slices sampled beyond coord_z (default: 4)")
 
     # ── Volume stage ──────────────────────────────────────────────────────────
-    vl = p.add_argument_group("Volume stage [v_ prefix → train_volume.py]")
-    vl.add_argument("--v_K",             type=int,   default=16,
+    vl = p.add_argument_group("Volume stage [v_ prefix → train_hexmil.py]")
+    vl.add_argument("--v_K",             type=int,   default=32,
                     help="Slice-window size K")
     vl.add_argument("--v_attn_dim",      type=int,   default=256)
     vl.add_argument("--v_dropout",       type=float, default=0.25)
@@ -98,7 +90,6 @@ def build_parser() -> argparse.ArgumentParser:
     vl.add_argument("--v_patience",      type=int,   default=15)
     vl.add_argument("--v_warmup_epochs", type=int,   default=3)
     vl.add_argument("--v_vis_every",     type=int,   default=5)
-    vl.add_argument("--v_vis_n_samples", type=int,   default=4)
     vl.add_argument("--v_run_name",      default=None,
                     help="Custom run-name for the volume stage")
 
@@ -110,16 +101,13 @@ def build_parser() -> argparse.ArgumentParser:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _infer_slice_ckpt_dir(args) -> Path:
-    """Reconstruct the out_dir that train_slice.py will create.
-    Mirrors the naming logic at lines 1099-1115 of train_slice.py exactly.
-    """
+    """Reconstruct the out_dir that train_slicemil.py will create."""
     fake_mods   = [m for m in (args.mods or ALL_FAKES) if m != "real"]
     stride_eff  = args.stride or (args.patch_size // 2)
     mods_tag    = "all" if set(fake_mods) == set(ALL_FAKES) else "+".join(sorted(fake_mods))
-    fourier_tag = "_fourier" if args.use_fourier    else ""
-    attn_tag    = "_attn"    if args.aux_attn_loss  else ""
+    attn_tag    = "_attn" if args.aux_attn_loss else ""
     base_dir    = (Path(WORK_DIR) / "runs"
-                   / f"slice-cls_{args.backbone}_p{args.patch_size}_s{stride_eff}{fourier_tag}{attn_tag}")
+                   / f"slice-cls_{args.backbone}_p{args.patch_size}_s{stride_eff}{attn_tag}")
     if args.s_run_name is not None:
         run_tag = args.s_run_name
     else:
@@ -155,17 +143,15 @@ def _build_slice_argv(args) -> list:
     a += ["--patience",      str(args.s_patience)]
     a += ["--warmup_epochs", str(args.s_warmup_epochs)]
     a += ["--vis_every",     str(args.s_vis_every)]
-    a += ["--vis_n_samples", str(args.s_vis_n_samples)]
     if args.s_scheduler:
         a += ["--scheduler"]
     if args.s_run_name is not None:
         a += ["--run_name", args.s_run_name]
     if args.aux_attn_loss:
         a += ["--aux_attn_loss"]
-    a += ["--aux_weight",       str(args.aux_weight)]
-    if args.use_fourier:
-        a += ["--use_fourier"]
-    a += ["--fourier_feat_dim", str(args.fourier_feat_dim)]
+    a += ["--aux_weight",          str(args.aux_weight)]
+    a += ["--neighborhood_radius", str(args.neighborhood_radius)]
+    a += ["--neighborhood_slices", str(args.neighborhood_slices)]
     return a
 
 
@@ -194,7 +180,6 @@ def _build_volume_argv(args, slice_ckpt_dir: Path) -> list:
     a += ["--patience",      str(args.v_patience)]
     a += ["--warmup_epochs", str(args.v_warmup_epochs)]
     a += ["--vis_every",     str(args.v_vis_every)]
-    a += ["--vis_n_samples", str(args.v_vis_n_samples)]
     if args.v_run_name is not None:
         a += ["--run_name", args.v_run_name]
     return a
@@ -219,10 +204,10 @@ def _run(script: Path, extra_argv: list):
 def main():
     args = build_parser().parse_args()
 
-    # ── Phase 1: slice ────────────────────────────────────────────────────────
-    _run(HERE / "train_slice.py", _build_slice_argv(args))
+    # ── Stage 1: slice ────────────────────────────────────────────────────────
+    _run(HERE / "train_slicemil.py", _build_slice_argv(args))
 
-    # ── Locate the checkpoint created by Phase 1 ─────────────────────────────
+    # ── Locate the checkpoint created by Stage 1 ─────────────────────────────
     slice_ckpt_dir = _infer_slice_ckpt_dir(args)
     ckpt_file      = slice_ckpt_dir / "best_model.pt"
     if not ckpt_file.exists():
@@ -231,8 +216,8 @@ def main():
         sys.exit(1)
     print(f"\n[train.py] Slice checkpoint confirmed:\n  {slice_ckpt_dir}\n")
 
-    # ── Phase 2: volume ───────────────────────────────────────────────────────
-    _run(HERE / "train_volume.py", _build_volume_argv(args, slice_ckpt_dir))
+    # ── Stage 2: volume ───────────────────────────────────────────────────────
+    _run(HERE / "train_hexmil.py", _build_volume_argv(args, slice_ckpt_dir))
 
 
 if __name__ == "__main__":

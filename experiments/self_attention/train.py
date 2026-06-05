@@ -216,10 +216,10 @@ def _run(script: Path, extra_argv: list):
 def main():
     args = build_parser().parse_args()
 
-    # ── Phase 1: slice ────────────────────────────────────────────────────────
+    # ── Stage 1: slice ────────────────────────────────────────────────────────
     _run(HERE / "train_slice-cls.py", _build_slice_argv(args))
 
-    # ── Locate the checkpoint created by Phase 1 ─────────────────────────────
+    # ── Locate the checkpoint created by Stage 1 ─────────────────────────────
     slice_ckpt_dir = _infer_slice_ckpt_dir(args)
     ckpt_file      = slice_ckpt_dir / "best_model.pt"
     if not ckpt_file.exists():
@@ -228,7 +228,7 @@ def main():
         sys.exit(1)
     print(f"\n[train.py] Slice checkpoint confirmed:\n  {slice_ckpt_dir}\n")
 
-    # ── Phase 2: volume ───────────────────────────────────────────────────────
+    # ── Stage 2: volume ───────────────────────────────────────────────────────
     _run(HERE / "train_volume-cls.py", _build_volume_argv(args, slice_ckpt_dir))
 
 if __name__ == "__main__":

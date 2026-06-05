@@ -2,7 +2,7 @@
 """
 eval_slice-cls.py  [SA-ABMIL variant]
 ======================================
-Phase B standalone evaluation: replicates exactly the end-of-training test
+Stage 1 standalone evaluation: replicates exactly the end-of-training test
 phase from train_slice-cls.py (SA variant).
 
 Loads best_model.pt from a run directory, rebuilds the OOD test dataset
@@ -55,10 +55,10 @@ build_sa_classifier_scratch   = _tm.build_sa_classifier_scratch
 
 def get_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description='Phase B eval (SA-ABMIL) — identical to end-of-training test evaluation'
+        description='Stage 1 eval (SA-ABMIL) — identical to end-of-training test evaluation'
     )
     parser.add_argument('--run_dir',     type=str, required=True,
-                        help='Path to a Phase B SA run directory (must contain '
+                        help='Path to a Stage 1 SA run directory (must contain '
                              'best_model.pt and args.json)')
     parser.add_argument('--batch_size',  type=int, default=8)
     parser.add_argument('--num_workers', type=int, default=4)
@@ -108,7 +108,7 @@ def main() -> None:
         device = torch.device('cpu')
 
     print(f"\n{'='*60}")
-    print(f"  Phase B Evaluation — SA-ABMIL slice classifier")
+    print(f"  Stage 1 Evaluation — SA-ABMIL slice classifier")
     print(f"{'='*60}")
     print(f"  Run dir       : {run_dir}")
     print(f"  Device        : {device}")

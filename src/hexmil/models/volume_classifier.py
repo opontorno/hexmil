@@ -1,30 +1,17 @@
 """
 volume_classifier.py
 ---------------------
-Phase C – Volume-level forgery classifier.
+HexMIL — Stage 2 volume-level forgery classifier.
 
-Architecture
-============
-    Phase B slice encoder (FROZEN)
-    ↓
-    Per-slice feature: encode_patches(patches_seq[k]) → h_k  (feat_dim,)
-                       + per-patch attention α_k             (N,)
-    ↓
-    Sinusoidal positional encoding on z_index → p_k (feat_dim,)
-    h_k ← h_k + p_k
-    ↓
-    Gated Volume Aggregator (TRAINABLE) over K slices
-    β = softmax(gated_attn([h_1..h_K]))  →  v = Σ β_k h_k   (feat_dim,)
-    ↓
-    MLP head (TRAINABLE): v → logit   (binary BCE)
+Architecture:
+    SliceMIL encoder (FROZEN)  → h_k + sinusoidal positional encoding
+    Gated Volume Aggregator (TRAINABLE):
+        β = softmax(gated_attn([h_1…h_K]))  →  v = Σ β_k h_k
+    MLP head (TRAINABLE): v → logit  (binary BCE)
 
-The 3-D heatmap is reconstructed as:
-    heatmap_3D[k, y, x] = β_k × α̃_k[y, x]
-where α̃_k is the per-patch attention map of slice k resized to (H, W).
+3-D heatmap: heatmap[k, y, x] = β_k × α̃_k[y, x]
 
-Public factory
---------------
-    build_volume_classifier(slice_ckpt_dir, K, attn_dim, dropout, device)
+Factory: build_volume_classifier(slice_ckpt_dir, K, attn_dim, dropout, device)
 """
 
 from __future__ import annotations
@@ -41,10 +28,6 @@ from hexmil.models.abmil_slice_classifier import (
     ABMILSliceClassifier,
     GatedAttention,
     build_abmil_classifier_scratch,
-)
-from hexmil.models.abmil_slice_classifier_fourier import (
-    FABMILSliceClassifier,
-    build_fabmil_classifier_scratch,
 )
 
 
@@ -93,7 +76,7 @@ class SinPosEncoding(nn.Module):
 
 class VolumeClassifier(nn.Module):
     """
-    Phase C volume-level binary classifier.
+    Stage 2 volume-level binary classifier.
 
     Args:
         slice_encoder:  ABMILSliceClassifier instance – will be FROZEN.
@@ -116,7 +99,7 @@ class VolumeClassifier(nn.Module):
         self.K        = K
         self.feat_dim = feat_dim
 
-        # ── frozen Phase B encoder ───────────────────────────────────────
+        # ── frozen Stage 1 encoder ───────────────────────────────────────
         self.slice_encoder = slice_encoder
         for p in self.slice_encoder.parameters():
             p.requires_grad_(False)
@@ -149,7 +132,7 @@ class VolumeClassifier(nn.Module):
         self, patches: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        Encode one slice via the frozen Phase B model.
+        Encode one slice via the frozen Stage 1 model.
 
         Args:
             patches:  (N, 1, P, P) — patches for a single slice.
@@ -255,40 +238,30 @@ def build_volume_classifier(
 ) -> Tuple[VolumeClassifier, dict]:
     """
     Build a VolumeClassifier:
-      1. Load Phase B args.json from `slice_ckpt_dir`.
+      1. Load Stage 1 args.json from `slice_ckpt_dir`.
       2. Reconstruct ABMILSliceClassifier and load best_model.pt weights.
       3. Wrap in VolumeClassifier with gated Z aggregator.
 
     Returns:
-        model:     VolumeClassifier (Phase B encoder frozen)
-        slice_args: dict with Phase B configuration (patch_size, stride, …)
+        model:     VolumeClassifier (Stage 1 encoder frozen)
+        slice_args: dict with Stage 1 configuration (patch_size, stride, …)
     """
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # ── Read Phase B args ────────────────────────────────────────────────
+    # ── Read Stage 1 args ────────────────────────────────────────────────
     args_path = os.path.join(slice_ckpt_dir, "args.json")
     with open(args_path) as f:
         sargs = json.load(f)
 
-    # ── Re-build Phase B model ───────────────────────────────────────────
-    if sargs.get("use_fourier", False):
-        slice_model: FABMILSliceClassifier = build_fabmil_classifier_scratch(
-            backbone         = sargs.get("backbone", "resnet50"),
-            pretrained       = False,
-            patch_size       = sargs.get("patch_size", 128),
-            fourier_feat_dim = sargs.get("fourier_feat_dim", 256),
-            proj_dim         = sargs.get("proj_dim", 512),
-            attn_dim         = sargs.get("attn_dim", 256),
-            dropout          = sargs.get("dropout",  0.25),
-        )
-    else:
-        slice_model: ABMILSliceClassifier = build_abmil_classifier_scratch(
-            backbone  = sargs.get("backbone", "resnet50"),
-            pretrained= False,
-            proj_dim  = sargs.get("proj_dim", 512),
-            attn_dim  = sargs.get("attn_dim", 256),
-            dropout   = sargs.get("dropout",  0.25),
+    # ── Re-build Stage 1 model ───────────────────────────────────────────
+    slice_model: ABMILSliceClassifier = build_abmil_classifier_scratch(
+            backbone   = sargs.get("backbone",   "resnet50"),
+            pretrained = False,
+            patch_size = sargs.get("patch_size", 64),
+            proj_dim   = sargs.get("proj_dim",   512),
+            attn_dim   = sargs.get("attn_dim",   256),
+            dropout    = sargs.get("dropout",    0.25),
         )
     ckpt_path = os.path.join(slice_ckpt_dir, "best_model.pt")
     ckpt      = torch.load(ckpt_path, map_location="cpu")

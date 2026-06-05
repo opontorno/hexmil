@@ -532,7 +532,8 @@ def train_slice(args):
                             patch_size=args.patch_size, stride=args.stride,
                             augment=False)
 
-    labels_arr = tab_train['mod'].apply(lambda m: 0 if m == 'real' else 1).values
+    labels_arr = np.array([0 if s['mod'] == 'real' else 1
+                           for s in ds_train.samples])
     cls_count  = np.bincount(labels_arr)
     cls_w      = 1.0 / np.maximum(cls_count, 1)
     sample_w   = cls_w[labels_arr]

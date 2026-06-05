@@ -2,22 +2,15 @@
 """
 inference.py
 ============
-Standalone single-volume inference for the ABMIL VolumeClassifier.
+Single-volume inference for a trained HexMIL (Stage 2) checkpoint.
 
-Reads all hyperparameters from the run's args.json.
-Divides the volume into non-overlapping K-slice windows (stride = K),
-runs inference on each, and sets vol_score = max(window probabilities).
+Reads all hyperparameters from the run's args.json. Divides the volume
+into non-overlapping K-slice windows and aggregates via max-score pooling.
 
-Usage
------
-    python experiments/ABMIL/inference.py \\
-        --run_dir  experiments/runs/volume-cls_resnet50_p128_s64_K32 \\
-        --scan_dir /mnt/.../M3DSynth/cycle/scan/rem_0001 \\
-        [--label_dir /mnt/.../M3DSynth/cycle/label/rem_0001] \\
-        [--out_dir /path/to/output] \\
-        [--save_3d] [--save_nifti] \\
-        [--beta_thresh 0.0] [--attn_thresh_3d 0.3] \\
-        [--gpu_id 0]
+Usage:
+    python inference.py --run_dir runs/volume-cls_resnet50_p64_s32_K32/trained_on_all \\
+        --scan_dir /path/to/volume/scan [--label_dir /path/to/label] \\
+        [--out_dir /path/to/output] [--save_3d] [--gpu_id 0]
 """
 
 from __future__ import annotations
@@ -55,7 +48,7 @@ WORK_DIR = Path(__file__).resolve().parent
 def get_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description='ABMIL single-volume inference')
     p.add_argument('--run_dir',   type=str, required=True,
-                   help='Path to Phase C run directory (contains args.json + best_model.pt)')
+                   help='Path to Stage 2 run directory (contains args.json + best_model.pt)')
     p.add_argument('--scan_dir',  type=str, required=True,
                    help='Path to scan directory (TIFF stack)')
     p.add_argument('--label_dir', type=str, default=None,
@@ -69,7 +62,10 @@ def get_args() -> argparse.Namespace:
     p.add_argument('--save_nifti',     action='store_true',
                    help='Export volume + attention heatmap as .nii.gz')
     p.add_argument('--beta_thresh',    type=float, default=0.1,
-                   help='Zero out slices with β_k < beta_thresh from the 3D heatmap ')
+                   help='Zero out slices with β_k < beta_thresh from the 3D heatmap')
+    p.add_argument('--win_stride',     type=int,   default=None,
+                   help='Step between window starts in slices '
+                        '(default: K = non-overlapping). Use K//2 for 50%% overlap.')
     p.add_argument('--attn_thresh_3d', type=float, default=0.65,
                    help='Attention threshold for 3D scatter voxel display')
     p.add_argument('--show_title',     action='store_true', default=False,
@@ -592,7 +588,7 @@ def save_slice_attention_grid(
         7, 4, figure=fig,
         wspace=0.012, hspace=0.012,
         left=0.02, right=0.99, top=0.965, bottom=0.005,
-        width_ratios=[1, 1, 1, 1],
+        width_ratios=[1.5, 1, 1, 1],
     )
 
     for ri, z in enumerate(row_zs):
@@ -625,14 +621,14 @@ def save_slice_attention_grid(
         # threshold marker — beta_thresh_n is beta_thresh normalised to [0,1] scale
         ax0b.axvline(beta_thresh_n, color='#ff6600', lw=2.0, ls='--',
                      zorder=4, alpha=0.9)
-        ax0b.text(beta_thresh_n + 0.01, 0.93, f'thr={beta_thresh:.2f}',
-                  va='top', ha='left', fontsize=14, color='#ff6600')
+        ax0b.text(beta_thresh_n + 0.01, 0.93, r'$\tau_{\beta}$ = '+f'{beta_thresh:.2f}',
+              va='top', ha='left', fontsize=25, color='#ff6600', fontweight='bold')
         if beta_n[z] > 0.22:
             ax0b.text(0.04, 0.5, f'{beta_full[z]:.3f}',
-                      va='center', ha='left', fontsize=18, color='white', zorder=3)
+                      va='center', ha='left', fontsize=25, color='white', zorder=3)
         else:
             ax0b.text(min(beta_n[z] + 0.03, 1.04), 0.5, f'{beta_full[z]:.3f}',
-                      va='center', ha='left', fontsize=18, color='#222222', zorder=3)
+                      va='center', ha='left', fontsize=25, color='#222222', zorder=3)
         ax0b.text(-0.04, 0.5, 'β',
                   va='center', ha='right', fontsize=34,
                   color='steelblue', fontweight='bold',
@@ -660,7 +656,7 @@ def save_slice_attention_grid(
                 ax0a.axvline(sep - 0.5, color='white', lw=0.4, alpha=0.4, zorder=3)
         else:
             ax0a.text(0.5, 0.5, 'no attn', va='center', ha='center',
-                      fontsize=18, color='#aaaaaa', transform=ax0a.transAxes)
+                      fontsize=25, color='#aaaaaa', transform=ax0a.transAxes)
 
         ax0a.set_xlim(-0.5, N_patches - 0.5)
         ax0a.set_ylim(0, 1.05)
@@ -668,8 +664,8 @@ def save_slice_attention_grid(
         # horizontal threshold line on α bar chart
         ax0a.axhline(alpha_thresh, color='#ff6600', lw=2.0, ls='--',
                      zorder=4, alpha=0.9)
-        ax0a.text(N_patches - 1, alpha_thresh + 0.02, f'{alpha_thresh:.2f}',
-                  va='bottom', ha='right', fontsize=14, color='#ff6600')
+        ax0a.text(N_patches - 1, alpha_thresh + 0.02, r'$\tau_{3D}$ = '+f'{alpha_thresh:.2f}',
+                  va='bottom', ha='right', fontsize=25, color='#ff6600', fontweight='bold')
         ax0a.text(0.01, 0.97, 'α', va='top', ha='left', fontsize=34,
                   color='red', fontweight='bold',
                   transform=ax0a.transAxes)
@@ -1008,9 +1004,17 @@ def run_inference(
     stride:             int,
     K:                  int,
     beta_thresh:        float = 0.0,
+    win_stride:         int | None = None,
 ) -> dict:
     """
-    Full-volume sliding-window inference (stride = K, non-overlapping).
+    Full-volume sliding-window inference.
+
+    Args:
+        win_stride: step between window starts in slices.
+                    Default (None) → K (non-overlapping).
+                    Use K//2 for 50% overlap; overlapping slices are averaged
+                    in the 3D heatmap and beta arrays.
+
     Returns dict with vol_score, pred, vol_full, hm_full, beta_full,
     valid_full, mask_full, z_indices_full, Z_total, H, W.
     """
@@ -1029,13 +1033,15 @@ def run_inference(
     N              = n_rows * n_cols
 
     vol_full   = np.zeros((Z_total, H, W), dtype=np.float32)
-    hm_full    = np.zeros((Z_total, H, W), dtype=np.float32)
-    beta_full  = np.zeros(Z_total, dtype=np.float32)
+    hm_accum   = np.zeros((Z_total, H, W), dtype=np.float32)
+    beta_accum = np.zeros(Z_total, dtype=np.float32)
+    count_full = np.zeros(Z_total, dtype=np.float32)
     valid_full = np.zeros(Z_total, dtype=bool)
     win_probs  = []
 
+    _win_stride = win_stride if win_stride is not None else K
     windows = []
-    for z_start in range(0, Z_total, K):
+    for z_start in range(0, Z_total, _win_stride):
         z_end       = z_start + K
         patches_out = torch.zeros(K, N, 1, patch_size, patch_size, dtype=torch.float32)
         z_indices   = torch.full((K,), -1, dtype=torch.long)
@@ -1082,12 +1088,19 @@ def run_inference(
 
         z0, z1 = win['z_start'], win['z_end']
         k_eff  = z1 - z0
-        vol_full[z0:z1] = vol_win[:k_eff]
-        hm_full[z0:z1]  = hmap[:k_eff]
+        vol_full[z0:z1] = vol_win[:k_eff]   # CT intensities: deterministic, last-write fine
         for lk in range(k_eff):
             if valid_np[lk]:
-                beta_full[z0 + lk]  = beta_np_w[lk]
-                valid_full[z0 + lk] = True
+                gz = z0 + lk
+                hm_accum[gz]   += hmap[lk]
+                beta_accum[gz] += beta_np_w[lk]
+                count_full[gz] += 1.0
+                valid_full[gz]  = True
+
+    # Average heatmap and beta over all windows that covered each slice
+    cnt       = np.maximum(count_full, 1.0)
+    hm_full   = hm_accum   / cnt[:, None, None]
+    beta_full = beta_accum / cnt
 
     vol_score = max(win_probs)
     return {
@@ -1162,26 +1175,15 @@ def main() -> None:
         )
     else:
         print("[WARN] slice_ckpt_dir not found; rebuilding slice encoder from sargs only")
-        if sargs.get('use_fourier', False):
-            from hexmil.models.abmil_slice_classifier_fourier import build_fabmil_classifier_scratch
-            slice_model = build_fabmil_classifier_scratch(
-                backbone         = sargs.get('backbone', 'resnet50'),
-                pretrained       = False,
-                patch_size       = sargs.get('patch_size', 128),
-                fourier_feat_dim = sargs.get('fourier_feat_dim', 256),
-                proj_dim         = sargs.get('proj_dim', 512),
-                attn_dim         = sargs.get('attn_dim', 256),
-                dropout          = sargs.get('dropout',  0.25),
-            )
-        else:
-            from hexmil.models.abmil_slice_classifier import build_abmil_classifier_scratch
-            slice_model = build_abmil_classifier_scratch(
-                backbone   = sargs.get('backbone', 'resnet50'),
-                pretrained = False,
-                proj_dim   = sargs.get('proj_dim', 512),
-                attn_dim   = sargs.get('attn_dim', 256),
-                dropout    = sargs.get('dropout',  0.25),
-            )
+        from hexmil.models.abmil_slice_classifier import build_abmil_classifier_scratch
+        slice_model = build_abmil_classifier_scratch(
+            backbone   = sargs.get('backbone',   'resnet50'),
+            pretrained = False,
+            patch_size = sargs.get('patch_size', 64),
+            proj_dim   = sargs.get('proj_dim',   512),
+            attn_dim   = sargs.get('attn_dim',   256),
+            dropout    = sargs.get('dropout',    0.25),
+        )
         model = VolumeClassifier(
             slice_encoder = slice_model,
             feat_dim      = slice_model.feat_dim,
@@ -1214,6 +1216,7 @@ def main() -> None:
         stride             = stride,
         K                  = K,
         beta_thresh        = args.beta_thresh,
+        win_stride         = args.win_stride,
     )
 
     vol_score = results['vol_score']

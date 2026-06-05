@@ -1,42 +1,22 @@
 """
 volume_classifier_sa.py
 -----------------------
-Phase C — Volume-level classifier with Slice Self-Attention (SA-Volume).
+SA-HexMIL — Stage 2 volume classifier with Slice Self-Attention.
 
-Architecture
-============
-    Phase B slice encoder (FROZEN — supports both ABMIL and SA-ABMIL)
-    ↓
-    Per-slice feature: encode_slice(patches_seq[k]) → h_k  (feat_dim,)
-                       + per-patch attention α_k            (N,)
-    ↓
-    Sinusoidal positional encoding on z_index → p_k (feat_dim,)
-    h_k ← h_k + p_k
-    ↓
-    SliceTransformer (TRAINABLE)  — K slices attend to each other
-    h_k' = TransformerEncoderLayer(h_1…h_K)[k]              (feat_dim,)
-    ↓
-    Gated Volume Aggregator (TRAINABLE)  — β weights over contextualised slices
-    β = softmax(gated_attn([h_1'…h_K']))  →  v = Σ β_k h_k'  (feat_dim,)
-    ↓
-    MLP head (TRAINABLE): v → logit   (binary BCE)
+Extends HexMIL by inserting a SliceTransformer between positional encoding
+and the Gated Volume Aggregator, letting each slice attend to all other
+slices in the K-slice window before pooling.
 
-Compared with VolumeClassifier (ABMIL):
-  • A SliceTransformer (Pre-LN, configurable depth/heads) is inserted after
-    positional encoding and before the Gated Attention aggregator.
-  • Each slice can now attend to all other slices in the window, letting the
-    model detect cross-slice inconsistencies — a domain-agnostic cue for
-    any forgery method (GAN, diffusion, inpainting).
-  • The β weights from GatedAttention still drive the 3-D attention heatmap
-    (β_k × α̃_k), maintaining full visualisation compatibility.
+Architecture:
+    SliceMIL encoder (FROZEN) + sinusoidal pos-enc
+    → SliceTransformer (TRAINABLE, pre-LN)
+    → Gated Volume Aggregator (TRAINABLE): β = softmax(...)  v = Σ β_k h_k'
+    → MLP head: v → logit
 
-Public factory
---------------
-    build_sa_volume_classifier(slice_ckpt_dir, K, attn_dim, dropout,
-                               sa_n_heads, sa_n_layers, device)
+Accepts checkpoints from both ABMILSliceClassifier and SABMILSliceClassifier
+(auto-detected from args.json).
 
-    Accepts checkpoints from both ABMILSliceClassifier and
-    SABMILSliceClassifier — detected automatically from args.json.
+Factory: build_sa_volume_classifier(slice_ckpt_dir, K, ...) → SAVolumeClassifier
 """
 
 from __future__ import annotations
@@ -118,7 +98,7 @@ class SliceTransformer(nn.Module):
 
 class SAVolumeClassifier(nn.Module):
     """
-    Phase C volume-level binary classifier with Slice Self-Attention.
+    Stage 2 volume-level binary classifier with Slice Self-Attention.
 
     Args:
         slice_encoder:  ABMILSliceClassifier (or SA variant) — FROZEN.
@@ -145,7 +125,7 @@ class SAVolumeClassifier(nn.Module):
         self.K        = K
         self.feat_dim = feat_dim
 
-        # ── frozen Phase B encoder ───────────────────────────────────────
+        # ── frozen Stage 1 encoder ───────────────────────────────────────
         self.slice_encoder = slice_encoder
         for p in self.slice_encoder.parameters():
             p.requires_grad_(False)
@@ -186,7 +166,7 @@ class SAVolumeClassifier(nn.Module):
         self, patches: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        Encode one slice via the frozen Phase B model.
+        Encode one slice via the frozen Stage 1 model.
 
         Args:
             patches: (N, 1, P, P)
@@ -294,14 +274,14 @@ def build_sa_volume_classifier(
     device:        Optional[torch.device] = None,
 ) -> Tuple['SAVolumeClassifier', dict]:
     """
-    Build an SAVolumeClassifier from a Phase B checkpoint.
+    Build an SAVolumeClassifier from a Stage 1 checkpoint.
 
     Automatically detects whether the checkpoint uses ABMILSliceClassifier
     or SABMILSliceClassifier by checking for 'use_sa' in args.json.
 
     Returns:
-        model:      SAVolumeClassifier (Phase B encoder frozen)
-        slice_args: dict with Phase B configuration
+        model:      SAVolumeClassifier (Stage 1 encoder frozen)
+        slice_args: dict with Stage 1 configuration
     """
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -330,11 +310,12 @@ def build_sa_volume_classifier(
             build_abmil_classifier_scratch,
         )
         slice_model = build_abmil_classifier_scratch(
-            backbone   = sargs.get("backbone",  "resnet50"),
+            backbone   = sargs.get("backbone",   "resnet50"),
             pretrained = False,
-            proj_dim   = sargs.get("proj_dim",  512),
-            attn_dim   = sargs.get("attn_dim",  256),
-            dropout    = sargs.get("dropout",   0.25),
+            patch_size = sargs.get("patch_size", 64),
+            proj_dim   = sargs.get("proj_dim",   512),
+            attn_dim   = sargs.get("attn_dim",   256),
+            dropout    = sargs.get("dropout",    0.25),
         )
 
     ckpt_path  = os.path.join(slice_ckpt_dir, "best_model.pt")
@@ -355,7 +336,7 @@ def build_sa_volume_classifier(
         sa_n_layers   = sa_n_layers,
     ).to(device)
 
-    print(f"  Loaded Phase B {'SA-ABMIL' if use_sa else 'ABMIL'} encoder "
+    print(f"  Loaded Stage 1 {'SA-ABMIL' if use_sa else 'ABMIL'} encoder "
           f"(frozen)  feat_dim={feat_dim}")
 
     return model, sargs

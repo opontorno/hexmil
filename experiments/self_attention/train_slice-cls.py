@@ -2,7 +2,7 @@
 """
 train_slice-cls.py  [SA-ABMIL variant]
 =======================================
-Phase B training script: full-slice binary classification via SA-ABMIL.
+Stage 1 training script: full-slice binary classification via SA-ABMIL.
 
 This is the Self-Attention version.  A lightweight Transformer encoder is
 inserted between the CNN patch embedder and the Gated ABMIL aggregator,
@@ -89,7 +89,7 @@ def select_best_gpu() -> int | None:
 # =============================================================================
 
 def get_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description='Phase B: slice-level MIL classification')
+    parser = argparse.ArgumentParser(description='Stage 1: slice-level MIL classification')
 
     # ── Backbone ──────────────────────────────────────────────────────────
     parser.add_argument('--backbone', type=str, default='resnet50',
@@ -191,11 +191,12 @@ def build_dataloaders(args) -> tuple[DataLoader, DataLoader, DataLoader]:
                              stride=stride, augment=False)
 
     if args.balance_classes:
-        labels = tab_train['mod'].apply(lambda m: 0 if m == 'real' else 1).values
+        labels = np.array([0 if s['mod'] == 'real' else 1
+                           for s in ds_train.samples])
         counts = np.bincount(labels)
         w_samp = 1.0 / counts[labels]
-        sampler     = WeightedRandomSampler(w_samp, len(w_samp), replacement=True)
-        shuffle_tr  = False
+        sampler    = WeightedRandomSampler(w_samp, len(w_samp), replacement=True)
+        shuffle_tr = False
     else:
         sampler    = None
         shuffle_tr = True
@@ -1161,7 +1162,7 @@ def main(args: argparse.Namespace) -> None:
         device = torch.device(f'cuda:{gid}') if gid is not None else torch.device('cpu')
 
     print(f"\n{'='*60}")
-    print(f"  Phase B Training — SA-ABMIL slice classifier")
+    print(f"  Stage 1 Training — SA-ABMIL slice classifier")
     print(f"{'='*60}")
     print(f"  Device:       {device}")
     print(f"  Backbone:     {args.backbone} (pretrained={args.pretrained})")

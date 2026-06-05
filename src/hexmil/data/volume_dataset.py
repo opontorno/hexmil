@@ -1,33 +1,24 @@
 """
 volume_dataset.py
 -----------------
-Dataset for Phase C: a fixed-length window of K axial slices.
+Stage 2 (HexMIL) dataset: K consecutive axial slices per sample.
 
-For *fake* volumes the annotated coord_z slice is placed at a uniformly
-random position within the K-slice window (any index 0 … K-1), keeping
-all K slices within the volume bounds.  This prevents the model from
-learning a positional shortcut (manipulation always in the centre).
+For fake volumes the annotated slice is placed at a random position within
+the K-slice window to prevent positional shortcuts. For real volumes a random
+K-slice window is drawn from the full volume.
 
-For *real* volumes a random consecutive K-slice window is drawn from the
-full volume; there is no anchor slice.
-
-The randomisation is applied at all splits (train / val / test).
-
-Each slice in the window is tiled into a bag of patches (identical pipeline
-to SliceDataset) so that the frozen Phase B encoder can process it directly.
+Each slice is tiled into a patch bag (same pipeline as SliceDataset) so the
+frozen SliceMIL encoder can process it directly.
 
 Returns a dict with:
-    patches    – Float32  (K, N, 1, P, P)   bag of patches for each slice
-    label      – int      0=real / 1=any-fake   (volume-level binary)
-    mod_label  – int      0-3 multi-class modality index
-    masks      – Float32  (K, 1, H, W)      full-res GT masks per slice
-    z_indices  – LongTensor (K,)             actual Z indices loaded
-                                             (-1 = padded / out-of-volume)
-    grid_hw    – LongTensor (K, 2)           [n_rows, n_cols] per slice
-    slice_hw   – LongTensor (2,)             [H, W] of the reference slice
-    mod        – str      modality name
-    img_id     – str      volume id
-    coord_z    – int      annotated axial slice index
+    patches   – (K, N, 1, P, P)  patch bags
+    label     – 0=real / 1=fake  (binary)
+    mod_label – 0-4 multi-class
+    masks     – (K, 1, H, W)     GT masks
+    z_indices – (K,)             actual Z indices (-1 = padded)
+    grid_hw   – (K, 2)           patch grid shape per slice
+    slice_hw  – (2,)             slice resolution
+    mod, img_id, coord_z
 """
 
 from __future__ import annotations
@@ -56,13 +47,13 @@ from hexmil.data.slice_dataset import build_patch_grid
 
 class VolumeDataset(Dataset):
     """
-    Phase C dataset — one sample = window of K axial slices around coord_z.
+    Stage 2 dataset — one sample = window of K axial slices around coord_z.
 
     Args:
         data_dir:   M3DSynth root directory.
         tab:        DataFrame from load_split_table().
         K:          number of slices in the window (must be even or odd, default 16).
-        patch_size: spatial size of each patch (must match the Phase B checkpoint).
+        patch_size: spatial size of each patch (must match the Stage 1 checkpoint).
         stride:     sliding-window step for patch extraction.
                     Default: patch_size // 2.
         augment:    if True, apply random horizontal/vertical flips.

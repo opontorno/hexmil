@@ -1,9 +1,12 @@
+"""
+tiff_utils.py
+-------------
+TIFF I/O utilities for loading and saving per-slice CT scan stacks.
+"""
+
 import os
 import numpy as np
 from PIL import Image
-#
-# Utility functions to load and save scans in tiff format
-#
 
 def get_shape_tiff_scan(dirname):
     index = 0

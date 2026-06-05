@@ -1,34 +1,15 @@
 #!/usr/bin/env python3
 """
-compare_results.py — Separate slice / volume results tables.
+compare_results.py
+==================
+Aggregates SliceMIL and HexMIL run results into two comparison CSVs.
 
-Run from the ABMIL experiment folder:
+Produces:
+  results/slices.csv   — one row per Stage 1 (SliceMIL) run
+  results/volumes.csv  — one row per Stage 2 (HexMIL) run
 
+Usage:
     python compare_results.py [--runs runs/] [--out_dir results/]
-
-Produces two CSVs:
-  results/slices.csv   — one row per slice run
-  results/volumes.csv  — one row per volume run
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-slices.csv columns
-  Meta       : patch_size  stride  use_fourier  aux_attn_loss
-               backbone  trained_on  epoch
-  Hyperparams: proj_dim  attn_dim   (from args.json)
-  Global cls : auc  acc  precision  recall  f1  ap
-  Per-mod cls: {pix2pix,cycle,diffusion}_{auc,acc,f1,ap}
-
-volumes.csv columns
-  Meta       : patch_size  stride  K  aux_attn_loss
-               backbone  trained_on  epoch
-  Hyperparams: vol_attn_dim  slice_attn_dim   (from args.json)
-  Global cls : auc  acc  ap  f1  pd_at_1
-  Per-mod cls: {pix2pix,cycle,diffusion}_{auc,acc,f1,ap,pd_at_1}
-  Global XAI : pixel_auc  iou_03  iou_05  iou_07  pointing_game
-  Per-mod XAI: same 5 keys × {pix2pix,cycle,diffusion}
-
-Sort order (both CSVs): patch_size → stride → K → aux_attn_loss → backbone → trained_on
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
 
 import argparse
@@ -54,7 +35,6 @@ _RUN_RE = re.compile(
     r"(?P<backbone>.+?)_"
     r"p(?P<ps>\d+)_s(?P<st>\d+)"
     r"(?:_K(?P<K>\d+))?"
-    r"(?P<fourier>_fourier)?"
     r"(?P<attn>_attn)?$"
 )
 
@@ -64,13 +44,12 @@ def _parse_run(name: str) -> dict | None:
     if not m:
         return None
     return dict(
-        kind        = m.group("kind"),
-        backbone    = m.group("backbone"),
-        patch_size  = int(m.group("ps")),
-        stride      = int(m.group("st")),
-        K           = int(m.group("K")) if m.group("K") else None,
-        use_fourier = bool(m.group("fourier")),
-        _attn_flag  = bool(m.group("attn")),
+        kind       = m.group("kind"),
+        backbone   = m.group("backbone"),
+        patch_size = int(m.group("ps")),
+        stride     = int(m.group("st")),
+        K          = int(m.group("K")) if m.group("K") else None,
+        _attn_flag = bool(m.group("attn")),
     )
 
 
@@ -144,7 +123,6 @@ def collect_slices(runs_dir: Path) -> pd.DataFrame:
             row = dict(
                 patch_size    = info["patch_size"],
                 stride        = info["stride"],
-                use_fourier   = info["use_fourier"],
                 aux_attn_loss = aux_attn,
                 trained_on    = _trained_on(sub.name),
                 backbone      = info["backbone"],
@@ -172,7 +150,7 @@ def collect_slices(runs_dir: Path) -> pd.DataFrame:
 
     df = pd.DataFrame(rows)
     df["_to_ord"] = df["trained_on"].map(lambda x: _TO_ORDER.get(x, 9))
-    df = (df.sort_values(["patch_size", "stride", "use_fourier" ,"aux_attn_loss", "trained_on",
+    df = (df.sort_values(["patch_size", "stride", "aux_attn_loss", "trained_on",
                           "backbone", "_to_ord"], na_position="first")
             .drop(columns=["_to_ord"])
             .reset_index(drop=True))
@@ -204,7 +182,6 @@ def collect_volumes(runs_dir: Path) -> pd.DataFrame:
             args           = json.loads((sub / "args.json").read_text()) if (sub / "args.json").exists() else {}
             slice_args     = args.get("slice_args", {})
             aux_attn       = bool(slice_args.get("aux_attn_loss", info["_attn_flag"]))
-            use_fourier    = bool(slice_args.get("use_fourier", False))
             vol_attn_dim   = args.get("attn_dim", None)
             slice_attn_dim = slice_args.get("attn_dim", None)
 
@@ -215,7 +192,6 @@ def collect_volumes(runs_dir: Path) -> pd.DataFrame:
                 stride         = info["stride"],
                 K              = info["K"],
                 aux_attn_loss  = aux_attn,
-                use_fourier    = use_fourier,
                 backbone       = info["backbone"],
                 trained_on     = _trained_on(sub.name),
                 epoch          = epoch,
@@ -248,7 +224,7 @@ def collect_volumes(runs_dir: Path) -> pd.DataFrame:
 
     df = pd.DataFrame(rows)
     df["_to_ord"] = df["trained_on"].map(lambda x: _TO_ORDER.get(x, 9))
-    df = (df.sort_values(["patch_size", "stride", "K", "aux_attn_loss", "use_fourier",
+    df = (df.sort_values(["patch_size", "stride", "K", "aux_attn_loss",
                           "backbone", "_to_ord"], na_position="first")
             .drop(columns=["_to_ord"])
             .reset_index(drop=True))
@@ -272,7 +248,7 @@ def _pretty(df: pd.DataFrame) -> str:
             disp[c] = disp[c].apply(
                 lambda x: str(int(x)) if pd.notna(x) and x == x else "—"
             )
-    for c in ("use_fourier", "aux_attn_loss"):
+    for c in ("aux_attn_loss",):
         if c in disp.columns:
             disp[c] = disp[c].apply(lambda x: "yes" if x else "no")
     return disp.to_string(index=False)

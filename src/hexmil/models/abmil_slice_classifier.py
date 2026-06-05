@@ -1,38 +1,19 @@
 """
 abmil_slice_classifier.py
 --------------------------
-Phase B — Attention-Based MIL slice classifier.
-
-A CT slice is represented as a **bag of N patches** (extracted by sliding
-window).  Each patch is encoded with a frozen Phase A CNN encoder
-(backbone + spatial attention → weighted GAP) into a fixed-length feature
-vector.  The bag of vectors is then aggregated with a **Gated Attention MIL**
-module (Ilse et al., 2018) that learns which patches to trust most.  The
-aggregated bag embedding is classified by a small FC head.
+SliceMIL — Stage 1 CT slice classifier via Attention-Based MIL (Ilse et al., 2018).
 
 Architecture:
-    ┌──────────────────────────────────────────┐
-    │  Frozen Phase A Encoder (per patch)       │
-    │  backbone → spatial_attn → weighted GAP   │  → f_k ∈ R^D  (D = feat_dim)
-    └──────────────────────────────────────────┘
-                      │  N vectors
-    ┌─────────────────▼────────────────────────┐
-    │  Linear Projector  D → proj_dim           │  → h_k ∈ R^M
-    └──────────────────────────────────────────┘
-                      │
-    ┌─────────────────▼────────────────────────┐
-    │  Gated ABMIL Attention                    │
-    │  a_k = softmax(w^T (tanh(Vh_k)⊙σ(Uh_k)))│  → attention weights (N,)
-    │  z   = Σ_k a_k h_k                       │  → bag repr. ∈ R^M
-    └──────────────────────────────────────────┘
-                      │
-    ┌─────────────────▼────────────────────────┐
-    │  Classification Head  M → 256 → 1         │  → logit ∈ R
-    └──────────────────────────────────────────┘
+    Patch encoder (backbone + spatial attention → GAP)  → f_k ∈ R^D  per patch
+    Linear projector  D → proj_dim (M)                  → h_k ∈ R^M
+    Gated ABMIL:  a_k = softmax(w^T (tanh(Vh_k) ⊙ σ(Uh_k)))
+                  z   = Σ_k a_k h_k                     → bag repr.
+    Classification head  M → 256 → 1                    → logit
 
-The attention weights a_k can be reshaped from (N,) to (n_rows, n_cols) and
-bilinearly upsampled to the original slice resolution to produce an
-interpretable localisation heatmap without any extra supervision.
+Attention weights a_k map back to the slice grid to produce a localisation
+heatmap without extra supervision.
+
+Factory: build_abmil_classifier_scratch(backbone, ...) → ABMILSliceClassifier
 """
 
 from __future__ import annotations
@@ -158,11 +139,16 @@ class ABMILSliceClassifier(nn.Module):
         B, N, C, P_h, P_w = patches.shape
         flat = patches.view(B * N, C, P_h, P_w)
 
-        feat_map = self.encoder.backbone(flat)[-1]     # (B*N, C_feat, h, w)
-        attn_map = self.encoder.spatial_attn(feat_map) # (B*N, 1, h, w)
-        v        = (feat_map * attn_map).mean(dim=[2, 3])  # (B*N, C_feat)
+        if hasattr(self.encoder, 'encode_patch'):
+            # ViT path: CLS token as patch feature
+            v = self.encoder.encode_patch(flat)            # (B*N, embed_dim)
+        else:
+            # CNN path: backbone + spatial attention + GAP
+            feat_map = self.encoder.backbone(flat)[-1]     # (B*N, C_feat, h, w)
+            attn_map = self.encoder.spatial_attn(feat_map) # (B*N, 1, h, w)
+            v        = (feat_map * attn_map).mean(dim=[2, 3])  # (B*N, C_feat)
 
-        return v.view(B, N, -1)                        # (B, N, raw_feat_dim)
+        return v.view(B, N, -1)                            # (B, N, raw_feat_dim)
 
     # ------------------------------------------------------------------
     def forward(
@@ -203,11 +189,12 @@ class ABMILSliceClassifier(nn.Module):
 
 
 def build_abmil_classifier_scratch(
-    backbone:   str   = 'resnet50',
-    pretrained: bool  = True,
-    proj_dim:   int   = 512,
-    attn_dim:   int   = 128,
-    dropout:    float = 0.25,
+    backbone:        str   = 'resnet50',
+    pretrained:      bool  = True,
+    proj_dim:        int   = 512,
+    attn_dim:        int   = 128,
+    dropout:         float = 0.25,
+    patch_size:      int   = 64,
 ) -> ABMILSliceClassifier:
     """
     Build an ABMILSliceClassifier with a freshly initialised encoder.
@@ -215,22 +202,44 @@ def build_abmil_classifier_scratch(
     end-to-end.
 
     Args:
-        backbone:   ResNet/EfficientNet backbone name.
-        pretrained: if True, initialise the backbone from ImageNet weights.
+        backbone:   CNN name (resnet50, densenet121, …), 'vit_base', or 'clip'.
+        pretrained: ImageNet init for CNN backbones; ignored for ViT/CLIP
+                    (pretrained weights always loaded from their respective sources).
         proj_dim:   patch feature projection dimension.
-        attn_dim:   gated attention internal dimension.
+        attn_dim:   gated ABMIL internal attention dimension.
         dropout:    dropout probability.
+        patch_size: spatial size of each patch (P×P). Used by ViT/CLIP encoders
+                    for positional-embedding interpolation; CNNs ignore it.
 
     Returns:
         ABMILSliceClassifier ready for end-to-end training.
     """
-    from hexmil.models.cnn_patch_classifier import build_cnn_classifier
+    if backbone == 'clip':
+        from hexmil.models.clip_patch_encoder import build_clip_encoder
 
-    encoder = build_cnn_classifier(
-        backbone=backbone,
-        pretrained=pretrained,
-        freeze_ratio=0.0,
-    )
+        # OpenAI CLIP ViT-B/16 visual backbone. Contrastive projection head
+        # removed; raw 768-dim CLS token used as patch feature.
+        # Patches are resized to 224×224 and CLIP-normalised inside the encoder.
+        encoder = build_clip_encoder()
+
+    elif backbone.startswith('vit'):
+        from hexmil.models.vit_patch_classifier import build_pretrained_vit_encoder
+
+        # ViT-Base/16 pretrained on ImageNet-21k/1k via timm.
+        # patch embed adapted to in_chans=1 (weights averaged 3→1);
+        # positional embeddings interpolated to patch_size/16 token grid.
+        encoder = build_pretrained_vit_encoder(
+            patch_size=patch_size,
+            freeze_ratio=0.0,
+        )
+    else:
+        from hexmil.models.cnn_patch_classifier import build_cnn_classifier
+
+        encoder = build_cnn_classifier(
+            backbone=backbone,
+            pretrained=pretrained,
+            freeze_ratio=0.0,
+        )
     return ABMILSliceClassifier(
         encoder=encoder,
         proj_dim=proj_dim,

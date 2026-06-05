@@ -1,23 +1,17 @@
 #!/usr/bin/env python3
 """
-eval_slice-cls.py
-=================
-Phase B standalone evaluation: replicates exactly the end-of-training test
-phase from train_slice-cls.py.
+eval_slice.py
+=============
+Stage 1 (SliceMIL) standalone evaluation.
 
-Loads best_model.pt from a run directory, rebuilds the OOD test dataset
-(same logic as training), and produces identical outputs:
+Loads best_model.pt from a run directory and replicates the end-of-training
+test evaluation, producing identical outputs:
   - evaluation/metrics.json
   - evaluation/per_sample_metrics.csv
-  - evaluation/grid_removal.png / grid_injection.png
-  - evaluation/vis/*.png  (if --save_vis)
-
-Identical results are guaranteed because this script imports and calls
-the exact same functions from train_slice-cls.py via importlib.
+  - evaluation/{mod}.png  (one per modality)
 
 Usage:
-    python experiments/ABMIL/eval_slice-cls.py \\
-        --run_dir experiments/ABMIL/runs/slice-cls_resnet50_p128_s64/trained_on_pix2pix_bce_bs16_lr1e-04
+    python eval_slice.py --run_dir runs/slice-cls_resnet50_p64_s32/trained_on_all
 """
 
 from __future__ import annotations
@@ -33,11 +27,11 @@ from torch.utils.data import DataLoader
 
 # ── Import train module to guarantee identical code paths ────────────────────
 # (importlib handles the hyphen in the filename)
-_TRAIN_PY = Path(__file__).resolve().parent / 'train_slice.py'
+_TRAIN_PY = Path(__file__).resolve().parent / 'train_slicemil.py'
 if not _TRAIN_PY.exists():
-    sys.exit(f'[ERROR] train_slice-cls.py not found at {_TRAIN_PY}')
+    sys.exit(f'[ERROR] train_slicemil.py not found at {_TRAIN_PY}')
 
-_spec = importlib.util.spec_from_file_location('train_slice_cls', _TRAIN_PY)
+_spec = importlib.util.spec_from_file_location('train_slicemil', _TRAIN_PY)
 _tm   = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_tm)
 
@@ -48,7 +42,6 @@ SliceDataset                    = _tm.SliceDataset
 load_split_table                = _tm.load_split_table
 run_test_evaluation_slice       = _tm.run_test_evaluation_slice
 build_abmil_classifier_scratch  = _tm.build_abmil_classifier_scratch
-build_fabmil_classifier_scratch = _tm.build_fabmil_classifier_scratch
 
 
 # =============================================================================
@@ -57,19 +50,15 @@ build_fabmil_classifier_scratch = _tm.build_fabmil_classifier_scratch
 
 def get_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description='Phase B eval — identical to end-of-training test evaluation'
+        description='Stage 1 eval — identical to end-of-training test evaluation'
     )
     parser.add_argument('--run_dir',     type=str, required=True,
-                        help='Path to a Phase B run directory (must contain '
+                        help='Path to a Stage 1 run directory (must contain '
                              'best_model.pt and args.json)')
     parser.add_argument('--batch_size',  type=int, default=8)
     parser.add_argument('--num_workers', type=int, default=4)
     parser.add_argument('--gpu_id',      type=int, default=None,
                         help='GPU id to use (default: cuda:0 if available)')
-    parser.add_argument('--save_vis',    action='store_true', default=True,
-                        help='Save per-sample visualisations in evaluation/vis/')
-    parser.add_argument('--max_vis',     type=int, default=20,
-                        help='Maximum number of individual vis to save')
     return parser.parse_args()
 
 
@@ -108,11 +97,8 @@ def main() -> None:
     else:
         device = torch.device('cpu')
 
-    use_fourier  = train_args.get('use_fourier', False)
-    variant_name = "FA-ABMIL" if use_fourier else "ABMIL"
-
     print(f"\n{'='*60}")
-    print(f"  Phase B Evaluation — {variant_name} slice classifier")
+    print(f"  Stage 1 Evaluation — ABMIL slice classifier")
     print(f"{'='*60}")
     print(f"  Run dir       : {run_dir}")
     print(f"  Device        : {device}")
@@ -125,24 +111,14 @@ def main() -> None:
     print("\nLoading model...")
     ckpt = torch.load(ckpt_path, map_location='cpu', weights_only=False)
 
-    if use_fourier:
-        model = build_fabmil_classifier_scratch(
-            backbone         = train_args.get('backbone', 'resnet50'),
-            pretrained       = False,
-            patch_size       = patch_size,
-            fourier_feat_dim = train_args.get('fourier_feat_dim', 256),
-            proj_dim         = train_args.get('proj_dim',  512),
-            attn_dim         = train_args.get('attn_dim',  128),
-            dropout          = train_args.get('dropout',  0.25),
-        )
-    else:
-        model = build_abmil_classifier_scratch(
-            backbone   = train_args.get('backbone', 'resnet50'),
-            pretrained = False,
-            proj_dim   = train_args.get('proj_dim',  512),
-            attn_dim   = train_args.get('attn_dim',  128),
-            dropout    = train_args.get('dropout',  0.25),
-        )
+    model = build_abmil_classifier_scratch(
+        backbone   = train_args.get('backbone',   'resnet50'),
+        pretrained = False,
+        patch_size = patch_size,
+        proj_dim   = train_args.get('proj_dim',   512),
+        attn_dim   = train_args.get('attn_dim',   128),
+        dropout    = train_args.get('dropout',   0.25),
+    )
     model.load_state_dict(ckpt['model_state_dict'])
     model = model.to(device)
     model.eval()
@@ -173,8 +149,6 @@ def main() -> None:
         stride          = stride,
         in_domain_fakes = set(fake_mods),
         seed            = seed,
-        save_vis        = args.save_vis,
-        max_vis         = args.max_vis,
     )
     cls_m = results['classification']
 

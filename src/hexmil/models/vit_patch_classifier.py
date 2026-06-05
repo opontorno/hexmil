@@ -1,7 +1,7 @@
 """
 vit_patch_classifier.py
 -----------------------
-Phase A — ViT-style patch-tokenised classifier.
+ViT-style patch-tokenised classifier.
 
 Takes a single-channel 2D patch (1, H, W) centred on the nodule, divides it
 into a grid of non-overlapping sub-patches (tokens), and uses a Vision Transformer
@@ -124,6 +124,7 @@ class ViTPatchClassifier(nn.Module):
         super().__init__()
         self.img_size   = img_size
         self.token_size = token_size
+        self.embed_dim  = embed_dim
         self.grid_size  = img_size // token_size      # e.g. 128 / 16 = 8
 
         # Patch embedding
@@ -160,6 +161,30 @@ class ViTPatchClassifier(nn.Module):
                 nn.init.trunc_normal_(m.weight, std=0.02)
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
+
+    @property
+    def feat_dim(self) -> int:
+        """Feature dimension exposed to ABMILSliceClassifier."""
+        return self.embed_dim
+
+    def encode_patch(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Return the CLS-token feature for a batch of patches.
+        Used by ABMILSliceClassifier.encode_patches() as the ViT path.
+
+        Args:
+            x: (B, 1, P, P)
+        Returns:
+            cls_feat: (B, embed_dim)
+        """
+        B = x.shape[0]
+        tokens = self.patch_embed(x)                        # (B, N, D)
+        cls = self.cls_token.expand(B, -1, -1)
+        tokens = torch.cat([cls, tokens], dim=1)            # (B, N+1, D)
+        tokens = self.pos_drop(tokens + self.pos_embed)
+        for blk in self.blocks:
+            tokens, _ = blk(tokens, need_weights=False)
+        return self.norm(tokens)[:, 0]                      # (B, embed_dim)
 
     def forward(self, x: torch.Tensor, return_attn: bool = False):
         """
@@ -221,3 +246,77 @@ def build_vit_classifier(
         depth=depth,
         num_heads=num_heads,
     )
+
+
+# ---------------------------------------------------------------------------
+#  Pretrained ViT-Base patch encoder (timm)
+# ---------------------------------------------------------------------------
+
+class PretrainedViTPatchEncoder(nn.Module):
+    """
+    ImageNet-pretrained ViT-Base/16 used as a patch-level feature encoder
+    inside ABMILSliceClassifier (Stage 1).
+
+    timm handles both adaptations automatically:
+      - img_size != 224: positional embeddings are bilinearly interpolated to
+        the new token grid (e.g. patch_size=128, token=16 → 8×8=64 tokens).
+      - in_chans=1: patch embedding weights are averaged over the channel dim
+        (3→1) to preserve pretrained filter structure.
+
+    num_classes=0 removes the classification head; forward() returns the
+    CLS token directly as a (B, 768) feature vector.
+
+    Args:
+        patch_size:   spatial size of each input patch (P×P)
+        freeze_ratio: fraction of transformer blocks to freeze (0 = train all)
+    """
+
+    TIMM_NAME = 'vit_base_patch16_224'
+    EMBED_DIM  = 768
+
+    def __init__(self, patch_size: int = 128, freeze_ratio: float = 0.0):
+        super().__init__()
+        try:
+            import timm as _timm
+        except ImportError as exc:
+            raise ImportError(
+                'PretrainedViTPatchEncoder requires timm: pip install timm'
+            ) from exc
+
+        self.vit = _timm.create_model(
+            self.TIMM_NAME,
+            pretrained=True,
+            img_size=patch_size,
+            in_chans=1,
+            num_classes=0,          # forward() → CLS token (B, 768)
+        )
+
+        if freeze_ratio > 0.0:
+            for p in self.vit.patch_embed.parameters():
+                p.requires_grad = False
+            blocks = list(self.vit.blocks)
+            n_freeze = int(len(blocks) * freeze_ratio)
+            for blk in blocks[:n_freeze]:
+                for p in blk.parameters():
+                    p.requires_grad = False
+
+    @property
+    def feat_dim(self) -> int:
+        return self.EMBED_DIM
+
+    def encode_patch(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        (B, 1, P, P) → (B, 768) CLS token.
+        Called by ABMILSliceClassifier.encode_patches().
+        """
+        return self.vit(x)
+
+    def forward(self, x: torch.Tensor, return_attn: bool = False):
+        return self.vit(x)
+
+
+def build_pretrained_vit_encoder(
+    patch_size: int = 128,
+    freeze_ratio: float = 0.0,
+) -> PretrainedViTPatchEncoder:
+    return PretrainedViTPatchEncoder(patch_size=patch_size, freeze_ratio=freeze_ratio)

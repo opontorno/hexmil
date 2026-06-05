@@ -2,7 +2,7 @@
 """
 train_phase_a.py
 ================
-Phase A training script: single-patch binary classification (real vs fake).
+Patch-level training script: single-patch binary classification (real vs fake).
 
 Supports:
   - CNN backbone (ResNet-50, EfficientNet-B4, …) via `--arch cnn`
@@ -63,7 +63,7 @@ def select_best_gpu():
     return best_gpu.id
 
 def get_args():
-    parser = argparse.ArgumentParser(description='Phase A: patch classification')
+    parser = argparse.ArgumentParser(description='Patch-level: patch classification')
 
     # ── Architecture ─────────────────────────────────────────────────────
     parser.add_argument('--arch', type=str, default='cnn', choices=['cnn', 'vit'], help='Model architecture family')
@@ -578,7 +578,7 @@ def main(args):
             device = torch.device('cpu')
             print("⚠️  No GPU available, using CPU")
     print(f"\n{'='*60}")
-    print(f"  Phase A Training — {args.arch.upper()}")
+    print(f"  Patch-level Training — {args.arch.upper()}")
     print(f"{'='*60}")
     print(f"  Device:     {device}")
     print(f"  Patch size: {args.patch_size}")

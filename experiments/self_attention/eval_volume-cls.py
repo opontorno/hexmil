@@ -2,7 +2,7 @@
 """
 eval_volume-cls.py
 ==================
-Phase C evaluation — importlib-based: imports helpers from train_volume-cls.py.
+Stage 2 evaluation — importlib-based: imports helpers from train_volume-cls.py.
 
 Normal mode:    calls run_test_evaluation_volume() from train (same as training eval).
 Full-vol mode:  --full_volume  → sliding K-slice windows, max-score aggregation.
@@ -72,9 +72,9 @@ _N_CAND_GRID = 40
 # =============================================================================
 
 def get_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description='Phase C evaluation')
+    p = argparse.ArgumentParser(description='Stage 2 evaluation')
     p.add_argument('--run_dir',     type=str, required=True,
-                   help='Path to the Phase C run directory')
+                   help='Path to the Stage 2 run directory')
     p.add_argument('--save_vis',    action='store_true', default=True,
                    help='Save individual per-volume visualisations')
     p.add_argument('--max_vis',     type=int, default=50)
@@ -674,7 +674,7 @@ def main() -> None:
         device = torch.device(f'cuda:{gid}') if gid is not None else torch.device('cpu')
 
     print(f"\n{'='*60}")
-    print(f"  Phase C Evaluation")
+    print(f"  Stage 2 Evaluation")
     print(f"{'='*60}")
     print(f"  Run:    {run_dir}")
     print(f"  Mode:   {'full_volume' if args.full_volume else 'block'}")

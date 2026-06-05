@@ -1,22 +1,19 @@
 """
 slice_dataset.py
 ----------------
-Dataset for Phase B: MIL bag of patches from a full CT slice.
+Stage 1 (SliceMIL) dataset: MIL bag of patches from a full CT slice.
 
-Each sample is one annotated axial slice (coord_z from data.csv).
-The slice is tiled into N patches via a sliding window.
-The entire bag shares a multiclass label (real=0, pix2pix=1, cycle=2, diffusion=3).
-Binary labels (real=0, fake=1) are derived downstream by callers via (label > 0).
+For fake volumes, slices with sufficient GT mask coverage around coord_z are
+selected; for real volumes, slices are sampled uniformly at random.
+Each slice is tiled into N overlapping patches via a sliding window.
 
 Returns a dict with:
-    patches   – Float32 (N, 1, P, P)  all patches in the bag
-    label     – int   0=real, 1=pix2pix, 2=cycle, 3=diffusion
-    mask      – Float32 (1, H, W)  full-resolution GT manipulation mask
-    grid_hw   – LongTensor [n_rows, n_cols]  shape of the patch grid
-    slice_hw  – LongTensor [H, W]  original slice resolution
-    mod       – str   modality name
-    img_id    – str   volume id
-    coord_z   – int   axial slice index
+    patches  – (N, 1, P, P)  patch bag
+    label    – 0=real, 1-4=fake modality (use label > 0 for binary)
+    mask     – (1, H, W)  GT manipulation mask
+    grid_hw  – [n_rows, n_cols]
+    slice_hw – [H, W]
+    mod, img_id, coord_z, ty
 """
 
 from __future__ import annotations
@@ -26,6 +23,8 @@ import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import Dataset
+
+from tqdm import tqdm
 
 from hexmil.utils.tiff_utils import (
     get_shape_tiff_scan,
@@ -159,15 +158,37 @@ def reconstruct_heatmap(
 
 class SliceDataset(Dataset):
     """
-    Phase B dataset — one sample = one annotated axial slice as a MIL bag.
+    Stage 1 dataset — one sample = one axial slice as a MIL bag of patches.
+
+    Slice selection per volume
+    --------------------------
+    Fake volumes:
+        coord_z (the annotated manipulation centre) is always included.
+        Up to ``neighborhood_slices`` additional slices are drawn uniformly
+        at random from the neighbourhood window
+        [coord_z - neighborhood_radius, coord_z + neighborhood_radius],
+        clipped to [0, Z_total).  Total slices per fake volume =
+        1 + neighborhood_slices.
+
+    Real volumes:
+        ``1 + neighborhood_slices`` slices are drawn uniformly at random
+        from [0, Z_total) so the per-volume count matches fake volumes.
+
+    No 3-D mask loading at init: only volume shapes are read (fast header
+    reads), so dataset construction is near-instantaneous.
 
     Args:
-        data_dir:   M3DSynth root (contains data.csv, sets.csv and per-mod dirs).
-        tab:        DataFrame returned by load_split_table().
-        patch_size: spatial size of each patch fed to the encoder (px).
-        stride:     sliding-window step.  Default = patch_size // 2 (50% overlap).
-        augment:    if True, apply random horizontal/vertical flips to the slice
-                    before tiling (training only).
+        data_dir:             M3DSynth root directory.
+        tab:                  DataFrame from load_split_table() — one row per volume.
+        patch_size:           Spatial size of each patch (px).
+        stride:               Sliding-window step.  Default = patch_size // 2.
+        augment:              Random H/V flips (training only).
+        neighborhood_radius:  Half-width of the window around coord_z from which
+                              extra slices are sampled.  Default 5 → window of
+                              ±5 slices (10 candidates, manipulated in all
+                              typical M3DSynth volumes whose span ≈ 23 slices).
+        neighborhood_slices:  Number of extra slices sampled beyond coord_z.
+                              Default 4 → 5 slices per fake volume total.
     """
 
     def __init__(
@@ -177,32 +198,125 @@ class SliceDataset(Dataset):
         patch_size: int = 128,
         stride: int | None = None,
         augment: bool = False,
+        neighborhood_radius: int = 5,
+        neighborhood_slices: int = 4,
     ):
         self.data_dir   = data_dir
-        self.tab        = tab.reset_index(drop=True)
         self.patch_size = patch_size
         self.stride     = stride if stride is not None else patch_size // 2
         self.augment    = augment
 
+        self.samples = self._build_samples(
+            tab.reset_index(drop=True),
+            neighborhood_radius,
+            neighborhood_slices,
+        )
+
+    # ------------------------------------------------------------------
+    def _build_samples(
+        self,
+        tab: pd.DataFrame,
+        radius: int,
+        n_extra: int,
+        seed: int = 42,
+    ) -> list[dict]:
+        """
+        Expand the volume-level table into a flat list of (volume, slice_z) samples.
+        No mask loading — uses only volume shapes and coord_z from the CSV.
+        """
+        rng     = np.random.default_rng(seed)
+        samples: list[dict] = []
+
+        fake_tab = tab[tab['mod'] != 'real']
+        real_tab = tab[tab['mod'] == 'real']
+
+        # ── Fake volumes: coord_z + neighbourhood ────────────────────────
+        for _, row in fake_tab.iterrows():
+            mod    = row['mod']
+            img_id = str(row['img_id'])
+            label  = MOD_LABEL.get(mod, 0)
+            cz     = int(row['coord_z'])
+
+            scan_dir = os.path.join(self.data_dir, mod, 'scan', img_id)
+            try:
+                Z_total = get_shape_tiff_scan(scan_dir)[0]
+            except Exception as exc:
+                print(f'  [SKIP] {mod}/{img_id}: {exc}')
+                continue
+
+            # Window around coord_z, clipped to valid range, excluding coord_z
+            lo   = max(0, cz - radius)
+            hi   = min(Z_total - 1, cz + radius)
+            pool = [z for z in range(lo, hi + 1) if z != cz]
+
+            chosen = [cz]
+            if n_extra > 0 and pool:
+                k      = min(n_extra, len(pool))
+                chosen += rng.choice(pool, size=k, replace=False).tolist()
+
+            ty_raw  = str(row.get('ty', 'injection'))
+            ty_norm = 'removal' if ty_raw in ('rem', 'removal') else 'injection'
+            for z in sorted(chosen):
+                samples.append({
+                    'mod':     mod,
+                    'img_id':  img_id,
+                    'label':   label,
+                    'slice_z': int(z),
+                    'ty':      ty_norm,
+                })
+
+        # ── Real volumes: sample enough slices to balance fake modalities ───
+        # Each fake volume contributes (1 + n_extra) slices; there are
+        # n_fake_mods fake modalities per real volume, so to equalise the
+        # total fake/real sample count we sample (1 + n_extra) * n_fake_mods
+        # slices from each real volume.
+        n_fake_mods   = fake_tab['mod'].nunique() if len(fake_tab) > 0 else 1
+        total_per_vol = (1 + n_extra) * n_fake_mods
+        for _, row in real_tab.iterrows():
+            img_id   = str(row['img_id'])
+            scan_dir = os.path.join(self.data_dir, 'real', 'scan', img_id)
+            try:
+                Z_total = get_shape_tiff_scan(scan_dir)[0]
+            except Exception as exc:
+                print(f'  [SKIP] real/{img_id}: {exc}')
+                continue
+
+            ty_real = 'removal' if img_id.startswith('rem_') else 'injection'
+            zs = rng.choice(Z_total, size=min(total_per_vol, Z_total), replace=False)
+            for z in zs:
+                samples.append({
+                    'mod':     'real',
+                    'img_id':  img_id,
+                    'label':   0,
+                    'slice_z': int(z),
+                    'ty':      ty_real,
+                })
+
+        n_fake = sum(1 for s in samples if s['mod'] != 'real')
+        n_real = len(samples) - n_fake
+        print(f'[SliceDataset] {len(samples)} samples  '
+              f'(fake: {n_fake}, real: {n_real})')
+        return samples
+
     # ------------------------------------------------------------------
     def __len__(self) -> int:
-        return len(self.tab)
+        return len(self.samples)
 
     def __getitem__(self, idx: int) -> dict:
-        row    = self.tab.iloc[idx]
-        mod    = row['mod']
-        img_id = str(row['img_id'])
-        cz     = int(row['coord_z'])
+        s      = self.samples[idx]
+        mod    = s['mod']
+        img_id = s['img_id']
+        cz     = s['slice_z']
 
         # ── Load full axial slice ────────────────────────────────────────
-        scan_dir   = os.path.join(self.data_dir, mod, 'scan', img_id)
-        shape      = get_shape_tiff_scan(scan_dir)              # (Z, H, W)
-        low, high  = get_percentile_tiff_scan(scan_dir, np.uint16)
+        scan_dir  = os.path.join(self.data_dir, mod, 'scan', img_id)
+        shape     = get_shape_tiff_scan(scan_dir)
+        low, high = get_percentile_tiff_scan(scan_dir, np.uint16)
 
         scan_slice = load_slice_tiff_scan(scan_dir, shape, np.uint16, cz, cz + 1)[0]
-        scan_slice = apply_percentile(scan_slice.astype(np.float32), low, high)  # [0,1] float32
+        scan_slice = apply_percentile(scan_slice.astype(np.float32), low, high)
 
-        # ── Load full-resolution manipulation mask ───────────────────────
+        # ── Load GT mask for this slice ──────────────────────────────────
         if mod == 'real':
             mask_slice = np.zeros_like(scan_slice, dtype=np.float32)
         else:
@@ -223,23 +337,20 @@ class SliceDataset(Dataset):
         patches, _positions, grid_hw = build_patch_grid(
             scan_slice, self.patch_size, self.stride
         )
-        # patches: (N, P, P)  float32
 
-        # ── To tensors ───────────────────────────────────────────────────
-        patches_t  = torch.from_numpy(patches).unsqueeze(1).float()   # (N, 1, P, P)
-        mask_t     = torch.from_numpy(mask_slice).unsqueeze(0).float()  # (1, H, W)
-
-        label = MOD_LABEL.get(mod, 0)   # multiclass: 0=real, 1=pix2pix, 2=cycle, 3=diffusion
+        patches_t = torch.from_numpy(patches).unsqueeze(1).float()   # (N, 1, P, P)
+        mask_t    = torch.from_numpy(mask_slice).unsqueeze(0).float() # (1, H, W)
 
         H, W = scan_slice.shape
 
         return dict(
-            patches   = patches_t,                          # (N, 1, P, P)
-            label     = label,                              # int  (multiclass)
-            mask      = mask_t,                             # (1, H, W)
-            grid_hw   = torch.tensor([grid_hw[0], grid_hw[1]], dtype=torch.long),
-            slice_hw  = torch.tensor([H, W], dtype=torch.long),
-            mod       = mod,
-            img_id    = img_id,
-            coord_z   = cz,
+            patches  = patches_t,
+            label    = s['label'],
+            mask     = mask_t,
+            grid_hw  = torch.tensor([grid_hw[0], grid_hw[1]], dtype=torch.long),
+            slice_hw = torch.tensor([H, W], dtype=torch.long),
+            mod      = mod,
+            img_id   = img_id,
+            coord_z  = cz,
+            ty       = s.get('ty', 'injection'),
         )

@@ -56,7 +56,7 @@ from hexmil.utils.tiff_utils import (
 def get_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description='SA-ABMIL single-volume inference')
     p.add_argument('--run_dir',   type=str, required=True,
-                   help='Path to Phase C run directory (contains args.json + best_model.pt)')
+                   help='Path to Stage 2 run directory (contains args.json + best_model.pt)')
     p.add_argument('--scan_dir',  type=str, required=True,
                    help='Path to scan directory (TIFF stack)')
     p.add_argument('--label_dir', type=str, default=None,

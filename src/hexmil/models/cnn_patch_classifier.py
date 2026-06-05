@@ -1,7 +1,7 @@
 """
 cnn_patch_classifier.py
 -----------------------
-Phase A — CNN backbone patch classifier.
+CNN backbone patch classifier.
 
 Takes a single-channel 2D patch (1, H, W) centred on the nodule and classifies it
 as real (0) or fake (1).  The backbone feature map is also used to produce a

@@ -1,47 +1,19 @@
 """
 abmil_slice_classifier_sa.py
 -----------------------------
-Phase B — ABMIL Slice Classifier with Patch Self-Attention (SA-ABMIL).
+SA-SliceMIL — Stage 1 ABMIL slice classifier with Patch Self-Attention.
 
-A Transformer encoder is inserted between the CNN feature extractor and the
-Gated ABMIL aggregator.  This lets each patch attend to every other patch in
-the same slice before the pooling step, capturing spatial inconsistency
-signals that are invisible when patches are treated independently.
+Extends SliceMIL by inserting a Transformer encoder between the CNN patch
+extractor and the Gated ABMIL aggregator, allowing each patch to attend
+to all other patches in the same slice before pooling.
 
 Architecture:
-    ┌──────────────────────────────────────────────────────────────┐
-    │  CNN Encoder (ResNet/EfficientNet + spatial_attn + GAP)      │
-    │  → f_k ∈ R^D                                                 │
-    └──────────────────────────────────────────────────────────────┘
-                          │  N vectors (D-dim)
-    ┌─────────────────────▼────────────────────────────────────────┐
-    │  Linear Projector  D → proj_dim (M)                          │
-    └──────────────────────────────────────────────────────────────┘
-                          │
-    ┌─────────────────────▼────────────────────────────────────────┐
-    │  PatchTransformer  (Pre-LN, sa_n_layers × sa_n_heads)        │
-    │  h_k' = TransformerEncoderLayer(h_1…h_N)[k]                 │
-    │  Each patch attends to ALL other patches in the same slice.  │
-    │  → (N, M)  contextualised patch representations              │
-    └──────────────────────────────────────────────────────────────┘
-                          │
-    ┌─────────────────────▼────────────────────────────────────────┐
-    │  Gated ABMIL Attention                                       │
-    │  a_k = softmax(w^T (tanh(Vh_k')⊙σ(Uh_k')))                 │
-    │  z   = Σ_k a_k h_k'                                         │
-    └──────────────────────────────────────────────────────────────┘
-                          │
-    ┌─────────────────────▼────────────────────────────────────────┐
-    │  Classification Head  M → 256 → 1                            │
-    └──────────────────────────────────────────────────────────────┘
+    CNN encoder → projector → PatchTransformer (pre-LN) → Gated ABMIL → head
 
-The ABMIL attention weights a_k can still be reshaped to (n_rows, n_cols)
-and upsampled to slice resolution for localisation heatmaps.
+Key extra hyperparameters (vs standard SliceMIL):
+    sa_n_heads, sa_n_layers  — Transformer depth and heads.
 
-Key hyper-parameters vs vanilla ABMIL:
-    sa_n_heads  (int, default 8)  — number of attention heads in Transformer.
-                                    proj_dim must be divisible by sa_n_heads.
-    sa_n_layers (int, default 2)  — depth of the Transformer encoder.
+Factory: build_sa_classifier_scratch(...) → SABMILSliceClassifier
 """
 
 from __future__ import annotations
@@ -114,7 +86,7 @@ class PatchTransformer(nn.Module):
 
 class SABMILSliceClassifier(nn.Module):
     """
-    Self-Attention ABMIL slice classifier (Phase B).
+    Self-Attention ABMIL slice classifier (Stage 1).
 
     Identical to ABMILSliceClassifier except that a PatchTransformer
     contextualisation step is applied after projection and before the

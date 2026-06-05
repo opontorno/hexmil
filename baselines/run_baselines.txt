@@ -38,6 +38,26 @@ tsp /home/opontorno/miniconda3/envs/medsota/bin/python baselines/train_3d_effici
 tsp /home/opontorno/miniconda3/envs/medsota/bin/python baselines/train_3d_efficientnet.py --data_dir /mnt/lguarnera_group/opontorno/med_datasets/M3DSynth --out_dir baselines/runs/3d_efficientnet/trained_on_cycle       --train_mods cycle
 tsp /home/opontorno/miniconda3/envs/medsota/bin/python baselines/train_3d_efficientnet.py --data_dir /mnt/lguarnera_group/opontorno/med_datasets/M3DSynth --out_dir baselines/runs/3d_efficientnet/trained_on_diffusion   --train_mods diffusion
 
+# ─── 3D-Swin (Swin3D-T)  [env: medsota] ──────────────────────────────────────
+tsp /home/opontorno/miniconda3/envs/medsota/bin/python baselines/train_3d_swin.py --data_dir /mnt/lguarnera_group/opontorno/med_datasets/M3DSynth --out_dir baselines/runs/3d_swin_K32/trained_on_pix2pix    --K 32 --train_mods real pix2pix
+tsp /home/opontorno/miniconda3/envs/medsota/bin/python baselines/train_3d_swin.py --data_dir /mnt/lguarnera_group/opontorno/med_datasets/M3DSynth --out_dir baselines/runs/3d_swin_K32/trained_on_cycle       --K 32 --train_mods real cycle
+tsp /home/opontorno/miniconda3/envs/medsota/bin/python baselines/train_3d_swin.py --data_dir /mnt/lguarnera_group/opontorno/med_datasets/M3DSynth --out_dir baselines/runs/3d_swin_K32/trained_on_diffusion   --K 32 --train_mods real diffusion
+
+# ─── 3D-ViT (ViT3D-Base, plain joint attention)  [env: medsota] ─────────────
+tsp /home/opontorno/miniconda3/envs/medsota/bin/python baselines/train_3d_vit.py --data_dir /mnt/lguarnera_group/opontorno/med_datasets/M3DSynth --out_dir baselines/runs/3d_vit_base_K32/trained_on_pix2pix    --arch vit3d_base --variant plain --K 32 --train_mods real pix2pix
+tsp /home/opontorno/miniconda3/envs/medsota/bin/python baselines/train_3d_vit.py --data_dir /mnt/lguarnera_group/opontorno/med_datasets/M3DSynth --out_dir baselines/runs/3d_vit_base_K32/trained_on_cycle       --arch vit3d_base --variant plain --K 32 --train_mods real cycle
+tsp /home/opontorno/miniconda3/envs/medsota/bin/python baselines/train_3d_vit.py --data_dir /mnt/lguarnera_group/opontorno/med_datasets/M3DSynth --out_dir baselines/runs/3d_vit_base_K32/trained_on_diffusion   --arch vit3d_base --variant plain --K 32 --train_mods real diffusion
+
+# ─── ViViT-F (ViT3D-Base, factorised spatial+temporal attention)  [env: medsota] ──
+tsp /home/opontorno/miniconda3/envs/medsota/bin/python baselines/train_3d_vit.py --data_dir /mnt/lguarnera_group/opontorno/med_datasets/M3DSynth --out_dir baselines/runs/3d_vit_f_base_K32/trained_on_pix2pix    --arch vit3d_base --variant factorised --K 32 --train_mods real pix2pix
+tsp /home/opontorno/miniconda3/envs/medsota/bin/python baselines/train_3d_vit.py --data_dir /mnt/lguarnera_group/opontorno/med_datasets/M3DSynth --out_dir baselines/runs/3d_vit_f_base_K32/trained_on_cycle       --arch vit3d_base --variant factorised --K 32 --train_mods real cycle
+tsp /home/opontorno/miniconda3/envs/medsota/bin/python baselines/train_3d_vit.py --data_dir /mnt/lguarnera_group/opontorno/med_datasets/M3DSynth --out_dir baselines/runs/3d_vit_f_base_K32/trained_on_diffusion   --arch vit3d_base --variant factorised --K 32 --train_mods real diffusion
+
+# ─── MViT-V2-S (Multiscale ViT, pooling attention)  [env: medsota] ──────────
+tsp /home/opontorno/miniconda3/envs/medsota/bin/python baselines/train_3d_mvit.py --data_dir /mnt/lguarnera_group/opontorno/med_datasets/M3DSynth --out_dir baselines/runs/3d_mvit_v2s_K16/trained_on_pix2pix    --arch mvit_v2_s --K 32 --train_mods real pix2pix
+tsp /home/opontorno/miniconda3/envs/medsota/bin/python baselines/train_3d_mvit.py --data_dir /mnt/lguarnera_group/opontorno/med_datasets/M3DSynth --out_dir baselines/runs/3d_mvit_v2s_K16/trained_on_cycle       --arch mvit_v2_s --K 32 --train_mods real cycle
+tsp /home/opontorno/miniconda3/envs/medsota/bin/python baselines/train_3d_mvit.py --data_dir /mnt/lguarnera_group/opontorno/med_datasets/M3DSynth --out_dir baselines/runs/3d_mvit_v2s_K16/trained_on_diffusion   --arch mvit_v2_s --K 32 --train_mods real diffusion
+
 # ─── Flat-CNN (ResNet-50 2D)  [env: medsota] ─────────────────────────────────
 tsp /home/opontorno/miniconda3/envs/medsota/bin/python baselines/train_flat_cnn.py --train_mods pix2pix
 tsp /home/opontorno/miniconda3/envs/medsota/bin/python baselines/train_flat_cnn.py --train_mods cycle

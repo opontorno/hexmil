@@ -1,19 +1,15 @@
 #!/usr/bin/env python3
 """
-eval_volume-cls.py
-==================
-Phase C evaluation — importlib-based: imports helpers from train_volume-cls.py.
+eval_volume.py
+==============
+Stage 2 (HexMIL) standalone evaluation.
 
-Normal mode:    calls run_test_evaluation_volume() from train (same as training eval).
-Full-vol mode:  --full_volume  → sliding K-slice windows, max-score aggregation.
+Normal mode:   replicates end-of-training test evaluation.
+Full-vol mode: --full_volume → sliding K-slice windows, max-score aggregation.
 
-Always tests on real + ALL_FAKES (test split).
-
-Usage
------
-    python experiments/ABMIL/eval_volume-cls.py \\
-        --run_dir experiments/ABMIL/runs/volume-cls_resnet50_p128_s64_K16/trained_on_all \\
-        [--full_volume] [--save_vis] [--max_vis 50] [--gpu_id 0]
+Usage:
+    python eval_volume.py --run_dir runs/volume-cls_resnet50_p64_s32_K32/trained_on_all
+    python eval_volume.py --run_dir <run_dir> --full_volume
 """
 from __future__ import annotations
 
@@ -29,8 +25,8 @@ from sklearn.metrics import roc_auc_score, accuracy_score, f1_score
 from scipy.special import expit as sigmoid_np
 
 # ── Import from train_volume-cls.py via importlib ─────────────────────────────
-_TRAIN_SCRIPT = Path(__file__).parent / 'train_volume.py'
-_spec = importlib.util.spec_from_file_location('_train_vol', _TRAIN_SCRIPT)
+_TRAIN_SCRIPT = Path(__file__).parent / 'train_hexmil.py'
+_spec = importlib.util.spec_from_file_location('_train_hexmil', _TRAIN_SCRIPT)
 _tm   = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_tm)
 
@@ -72,17 +68,21 @@ _N_CAND_GRID = 40
 # =============================================================================
 
 def get_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description='Phase C evaluation')
+    p = argparse.ArgumentParser(description='Stage 2 evaluation')
     p.add_argument('--run_dir',     type=str, required=True,
-                   help='Path to the Phase C run directory')
+                   help='Path to the Stage 2 run directory')
     p.add_argument('--save_vis',    action='store_true', default=True,
                    help='Save individual per-volume visualisations')
     p.add_argument('--max_vis',     type=int, default=50)
     p.add_argument('--gpu_id',      type=int, default=None)
     p.add_argument('--num_workers', type=int, default=4)
     p.add_argument('--full_volume', action='store_true',
-                   help='Evaluate on full volumes (sliding K-slice windows, stride=K) '
+                   help='Evaluate on full volumes (sliding K-slice windows) '
                         'instead of pre-chunked VolumeDataset blocks')
+    p.add_argument('--win_stride', type=int, default=None,
+                   help='Step between window starts in slices '
+                        '(default: K = non-overlapping). '
+                        'Use K//2 for 50%% overlap.')
     # ── β-threshold heatmap masking (full_volume mode only) ───────────────
     p.add_argument('--beta_thresh', type=float, default=0.2,
                    help='Zero out slices with β_k < beta_thresh from the 3D heatmap '
@@ -287,9 +287,16 @@ def load_full_volume_windows(
     K:          int,
     patch_size: int,
     stride:     int,
+    win_stride: int | None = None,
 ) -> dict:
     """
-    Load an entire CT volume and divide it into non-overlapping K-slice windows.
+    Load an entire CT volume and divide it into K-slice windows.
+
+    Args:
+        win_stride: step between window starts in slices.
+                    Default (None) → K (non-overlapping).
+                    Use K//2 for 50% overlap; overlapping slices are averaged
+                    by run_full_volume_eval when building the 3D heatmap.
 
     Returns dict with keys: windows, meta, scan_full, mask_full, low, high.
     Each window dict: patches (K,N,1,P,P), z_indices (K,), valid_mask (K,),
@@ -311,9 +318,10 @@ def load_full_volume_windows(
     _, _, grid_hw = build_patch_grid(np.zeros((H, W), dtype=np.float32), patch_size, stride)
     n_rows, n_cols = grid_hw
     N              = n_rows * n_cols
+    _win_stride    = win_stride if win_stride is not None else K
 
     windows = []
-    for z_start in range(0, Z_total, K):
+    for z_start in range(0, Z_total, _win_stride):
         z_end       = z_start + K
         patches_out = torch.zeros(K, N, 1, patch_size, patch_size, dtype=torch.float32)
         z_indices   = torch.full((K,), -1, dtype=torch.long)
@@ -340,13 +348,14 @@ def load_full_volume_windows(
     return {
         'windows': windows,
         'meta': {
-            'img_id':    img_id,
-            'mod':       mod,
-            'Z_total':   Z_total,
-            'H':         H,
-            'W':         W,
-            'n_windows': len(windows),
-            'grid_hw':   grid_hw,
+            'img_id':     img_id,
+            'mod':        mod,
+            'Z_total':    Z_total,
+            'H':          H,
+            'W':          W,
+            'n_windows':  len(windows),
+            'grid_hw':    grid_hw,
+            'win_stride': _win_stride,
         },
         'scan_full': scan_full,
         'mask_full': mask_full,
@@ -420,10 +429,19 @@ def run_full_volume_eval(
     vis_dir:     Path | None,
     max_vis:     int,
     beta_thresh: float = 0.0,
+    win_stride:  int | None = None,
 ) -> dict:
     """
-    Full-volume evaluation: each volume is divided into non-overlapping K-slice
-    windows (stride = K).  vol_score = max(p_window).
+    Full-volume evaluation with optional overlapping sliding windows.
+
+    vol_score = max(p_window) across all windows.
+    3D heatmap and beta_full are averaged over all windows that cover each slice,
+    so overlapping slices receive a consensus score rather than whichever window
+    happened to be processed last.
+
+    Args:
+        win_stride: step between window starts (default: K = non-overlapping).
+                    Use K//2 for 50% overlap.
 
     Returns results dict with keys: cls, xai, grid_samples, per_sample_records.
     """
@@ -447,7 +465,8 @@ def run_full_volume_eval(
         gt      = 0 if mod == 'real' else 1
 
         try:
-            data = load_full_volume_windows(mod, img_id, K, patch_size, stride)
+            data = load_full_volume_windows(mod, img_id, K, patch_size, stride,
+                                            win_stride=win_stride)
         except Exception as exc:
             print(f'  [SKIP] {mod}/{img_id}: {exc}')
             continue
@@ -466,42 +485,50 @@ def run_full_volume_eval(
         pred      = 1 if vol_score > 0.5 else 0
 
         # ── Merge windows → full-volume arrays ─────────────────────────────
+        # CT intensities: last-write is fine (same data for every window).
+        # Heatmap and beta: accumulate then average over all windows that cover
+        # each slice — with no overlap this reduces to a single write;
+        # with overlap each slice gets the consensus across its windows.
         vol_full   = np.zeros((Z_total, H, W), dtype=np.float32)
-        hm_full    = np.zeros((Z_total, H, W), dtype=np.float32)
-        beta_full  = np.zeros(Z_total, dtype=np.float32)
+        hm_accum   = np.zeros((Z_total, H, W), dtype=np.float32)
+        beta_accum = np.zeros(Z_total, dtype=np.float32)
+        count_full = np.zeros(Z_total, dtype=np.float32)
         valid_full = np.zeros(Z_total, dtype=bool)
 
         for res in win_results:
             z0, z1 = res['z_start'], res['z_end']
             k_eff  = z1 - z0
             vol_full[z0:z1] = res['volume_3d'][:k_eff]
-            hm_full[z0:z1]  = res['heatmap_3d'][:k_eff]
             for lk in range(k_eff):
                 if res['valid_mask'][lk]:
-                    beta_full[z0 + lk]  = res['beta'][lk]
-                    valid_full[z0 + lk] = True
+                    gz = z0 + lk
+                    hm_accum[gz]   += res['heatmap_3d'][lk]
+                    beta_accum[gz] += res['beta'][lk]
+                    count_full[gz] += 1.0
+                    valid_full[gz]  = True
+
+        cnt        = np.maximum(count_full, 1.0)
+        hm_full    = hm_accum   / cnt[:, None, None]
+        beta_full  = beta_accum / cnt
 
         z_indices_full = np.arange(Z_total)
 
         # ── 2-D pixel-level XAI on the slice at coord_z ────────────────────
+        # Use hm_full[coord_z] which already averages across all windows
+        # that covered that slice (works for both overlap and no-overlap).
         xai_keys_blank = ['pixel_auc', 'iou_03', 'iou_05', 'iou_07',
                           'pointing_game']
         xai_row = {k: float('nan') for k in xai_keys_blank}
 
-        if gt == 1 and coord_z is not None:
-            coord_win = next(
-                (r for r in win_results if r['z_start'] <= coord_z < r['z_end']), None,
-            )
-            if coord_win is not None:
-                lk_coord = coord_z - coord_win['z_start']
-                mask_2d  = mask_full[coord_z]
-                hm_2d    = coord_win['heatmap_3d'][lk_coord]
-                if mask_2d.sum() > 0:
-                    xai = compute_xai_metrics(_smooth_attn(hm_2d), mask_2d)
-                    xai['img_id'] = img_id
-                    xai['mod']    = mod
-                    all_xai.append(xai)
-                    xai_row = {k: xai.get(k, float('nan')) for k in xai_keys_blank}
+        if gt == 1 and coord_z is not None and valid_full[coord_z]:
+            mask_2d = mask_full[coord_z]
+            hm_2d   = hm_full[coord_z]
+            if mask_2d.sum() > 0:
+                xai = compute_xai_metrics(_smooth_attn(hm_2d), mask_2d)
+                xai['img_id'] = img_id
+                xai['mod']    = mod
+                all_xai.append(xai)
+                xai_row = {k: xai.get(k, float('nan')) for k in xai_keys_blank}
 
         per_sample_records.append({
             'img_id':           img_id,
@@ -681,7 +708,7 @@ def main() -> None:
         device = torch.device(f'cuda:{gid}') if gid is not None else torch.device('cpu')
 
     print(f"\n{'='*60}")
-    print(f"  Phase C Evaluation")
+    print(f"  Stage 2 Evaluation")
     print(f"{'='*60}")
     print(f"  Run:    {run_dir}")
     print(f"  Mode:   {'full_volume' if args.full_volume else 'block'}")
@@ -742,6 +769,7 @@ def main() -> None:
             vis_dir     = vis_dir,
             max_vis     = args.max_vis,
             beta_thresh = args.beta_thresh,
+            win_stride  = args.win_stride,
         )
         grid_samples       = results.pop('grid_samples')
         per_sample_records = results.pop('per_sample_records')
@@ -762,7 +790,6 @@ def main() -> None:
             run_dir         = run_dir,
             sargs           = sargs,
             in_domain_fakes = set(ALL_FAKES),
-            save_vis        = args.save_vis,
         )
         # Normal mode: run_test_evaluation_volume already saved metrics.json,
         # per_sample.csv, GIFs, and nodule grids.

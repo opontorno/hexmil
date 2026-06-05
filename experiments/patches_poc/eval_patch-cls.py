@@ -2,7 +2,7 @@
 """
 eval_phase_a.py
 ===============
-Phase A evaluation script.
+Patch-level evaluation script.
 
 Loads a trained checkpoint and computes:
   1. **Classification metrics**: AUC-ROC, Accuracy, Precision, Recall, F1 — overall and per-modality.

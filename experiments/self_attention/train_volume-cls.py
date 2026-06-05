@@ -2,12 +2,12 @@
 """
 train_volume-cls.py  [SA-ABMIL variant]
 ========================================
-Phase C – Training script for the volume-level binary forgery classifier
+Stage 2 – Training script for the volume-level binary forgery classifier
 using Self-Attention slice contextualization.
 
 Architecture
 ------------
-  - Phase B (ABMILSliceClassifier or SABMILSliceClassifier) checkpoint → frozen slice encoder
+  - Stage 1 (ABMILSliceClassifier or SABMILSliceClassifier) checkpoint → frozen slice encoder
   - Sinusoidal positional encoding on Z-axis
   - SliceTransformer (lightweight Transformer encoder) contextualizes K slice embeddings
   - Gated MIL aggregator over K contextualized slices (TRAINABLE)
@@ -15,10 +15,10 @@ Architecture
 
 The SliceTransformer lets each slice attend to all other slices in the
 volume window before pooling, capturing global Z-axis inconsistencies.
-The Phase B encoder is fully frozen; only the SA module, aggregator and
+The Stage 1 encoder is fully frozen; only the SA module, aggregator and
 head are trained.
 
-The script reads Phase B's patch_size / stride directly from its args.json.
+The script reads Stage 1's patch_size / stride directly from its args.json.
 Only the gated Z-aggregator and head are trained; the slice encoder is frozen.
 
 Usage
@@ -82,15 +82,15 @@ def select_best_gpu() -> int | None:
 # =============================================================================
 
 def get_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description='Phase C: volume-level classification')
+    p = argparse.ArgumentParser(description='Stage 2: volume-level classification')
 
     p.add_argument('-ckpt_dir', '--slice_ckpt_dir', type=str, required=True,
-                   help='Path to the Phase B run directory containing args.json '
+                   help='Path to the Stage 1 run directory containing args.json '
                         'and best_model.pt')
 
     # ── Volume window ─────────────────────────────────────────────────────────
     p.add_argument('--K', type=int, default=32,
-                   help='Number of slices in the window (Phase 3.1)')
+                   help='Number of slices in the window (Stage 2)')
 
     # ── Modalities ───────────────────────────────────────────────────────────
     p.add_argument('--mods', nargs='+', default=None,
@@ -678,7 +678,7 @@ def save_nodule_grid(
     in_domain_fakes: set | None = None,
 ) -> None:
     """
-    5 rows × 12 cols nodule-context summary grid (Phase C).
+    5 rows × 12 cols nodule-context summary grid (Stage 2).
     Rows (top→bottom): z+2 | z+1 | ★ nodule (bbox) | z-1 | z-2
     Col groups (×4 mods): [ CT  |  Attention  |  Overlay ]
     """
@@ -1358,8 +1358,8 @@ def main(args: argparse.Namespace) -> None:
         gid    = select_best_gpu()
         device = torch.device(f'cuda:{gid}') if gid is not None else torch.device('cpu')
 
-    # ── Load Phase B checkpoint + build SA model ──────────────────────────────
-    print(f"\nLoading Phase B checkpoint from: {args.slice_ckpt_dir}")
+    # ── Load Stage 1 checkpoint + build SA model ──────────────────────────────
+    print(f"\nLoading Stage 1 checkpoint from: {args.slice_ckpt_dir}")
     model, sargs = build_sa_volume_classifier(
         slice_ckpt_dir = args.slice_ckpt_dir,
         K              = args.K,
@@ -1384,10 +1384,10 @@ def main(args: argparse.Namespace) -> None:
     stride       = sargs.get('stride') or (patch_size // 2)
 
     print(f"\n{'='*60}")
-    print(f"  Phase C Training — Volume-level classifier")
+    print(f"  Stage 2 Training — Volume-level classifier")
     print(f"{'='*60}")
     print(f"  Device:        {device}")
-    print(f"  Phase B:       {args.slice_ckpt_dir}")
+    print(f"  Stage 1:       {args.slice_ckpt_dir}")
     print(f"  Backbone:      {backbone_tag}  patch={patch_size}  stride={stride}")
     print(f"  Window:        K={args.K}  (random coord_z offset)")
     print(f"  attn_dim={args.attn_dim}   dropout={args.dropout}")
