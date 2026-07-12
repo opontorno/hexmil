@@ -5,12 +5,32 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "hexmil"
 version = "0.1.0"
-description = ""
+description = "Hierarchical Attention MIL for Ante-Hoc Explainable Detection of AI-Manipulated CT Volumes"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
 authors = [
-  { name="opontorno", email="orazio.pontono@phd.unict.it" }
+  { name = "Orazio Pontorno", email = "orazio.pontorno@phd.unict.it" }
 ]
+keywords = ["medical-deepfakes", "aigc-detection", "multiple-instance-learning", "explainability", "ct"]
 dependencies = [
+  "torch>=2.0",
+  "torchvision>=0.15",
+  "timm>=0.9",
+  "numpy>=1.24",
+  "pandas>=2.0",
+  "scipy>=1.10",
+  "scikit-learn>=1.3",
+  "Pillow>=9.5",
+  "matplotlib>=3.7",
+  "tqdm>=4.65",
+  "wandb>=0.16",
+  "GPUtil>=1.4",
 ]
+
+[project.optional-dependencies]
+nifti = ["nibabel>=5.1"]
+dicom = ["pydicom>=2.4"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

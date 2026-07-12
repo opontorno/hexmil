@@ -37,21 +37,25 @@ baselines/
 
 ### 1. Clone the official repositories
 
+The baseline models are imported verbatim from their authors' code. Fetch every
+repository at the exact pinned commit with the helper script:
+
 ```bash
-cd baselines/git_repo
-
-git clone https://github.com/lihaod/Deep_inpainting_localization.git
-# commit: d33468d
-
-git clone https://github.com/ISICV/ManTraNet.git
-# commit: 59436db
-
-git clone https://github.com/dong03/MVSS-Net.git
-# commit: cc2aed7
-
-git clone https://github.com/grip-unina/TruFor.git
-# commit: ae54475
+bash baselines/clone_repos.sh
 ```
+
+This clones all eight upstream repositories into `baselines/git_repo/`:
+
+| Repo | URL | Commit |
+|------|-----|--------|
+| `NPR-DeepfakeDetection` | github.com/chuangchuangtan/NPR-DeepfakeDetection | `781ced3` |
+| `FreqNet-DeepfakeDetection` | github.com/chuangchuangtan/FreqNet-DeepfakeDetection | `2c6bd02` |
+| `D3` | github.com/BigAandSmallq/D3 | `14f21ad` |
+| `DeepFeatureX-SN` | github.com/opontorno/DeepFeatureX-SN | `ec0fe2f` |
+| `MVSS-Net` | github.com/dong03/MVSS-Net | `cc2aed7` |
+| `TruFor` | github.com/grip-unina/TruFor | `ae54475` |
+| `ManTraNet` | github.com/ISICV/ManTraNet | `59436db` |
+| `Deep_inpainting_localization` | github.com/lihaod/Deep_inpainting_localization | `d33468d` |
 
 ### 2. Install dependencies
 
