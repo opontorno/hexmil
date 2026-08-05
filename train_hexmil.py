@@ -1,17 +1,4 @@
 #!/usr/bin/env python3
-"""
-train_hexmil.py
-===============
-Stage 2 — HexMIL training: volume-level binary forgery classification.
-
-Loads a frozen SliceMIL (Stage 1) checkpoint as the slice encoder and trains
-a Gated MIL aggregator over K slices plus a binary classification head.
-
-Usage:
-    python train_hexmil.py \\
-        --slice_ckpt_dir runs/slice-cls_resnet50_p64_s32/trained_on_all \\
-        --K 32 --batch_size 8 --epochs 60
-"""
 
 from __future__ import annotations
 
@@ -38,16 +25,11 @@ import GPUtil
 from hexmil.data.patch_dataset import load_split_table
 from hexmil.data.volume_dataset import VolumeDataset
 from hexmil.data.slice_dataset import reconstruct_heatmap
-from hexmil.models.volume_classifier import VolumeClassifier, build_volume_classifier
+from hexmil.models.hexmil import HexMIL, build_hexmil
 
-# ── paths ────────────────────────────────────────────────────────────────────
-from config import DATA_DIR, WORK_DIR
+from config import DATA_DIR, WORK_DIR, require_data_dir
 ALL_FAKES = ['pix2pix', 'cycle', 'diffusion', 'ctgan']
 
-
-# =============================================================================
-#  GPU selection
-# =============================================================================
 
 def select_best_gpu() -> int | None:
     if not torch.cuda.is_available():
@@ -62,10 +44,6 @@ def select_best_gpu() -> int | None:
     return best.id
 
 
-# =============================================================================
-#  Args
-# =============================================================================
-
 def get_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description='Stage 2: volume-level classification')
 
@@ -73,20 +51,16 @@ def get_args() -> argparse.Namespace:
                    help='Path to the Stage 1 run directory containing args.json '
                         'and best_model.pt')
 
-    # ── Volume window ─────────────────────────────────────────────────────────
     p.add_argument('--K', type=int, default=32,
                    help='Number of slices in the window')
 
-    # ── Modalities ───────────────────────────────────────────────────────────
     p.add_argument('--mods', nargs='+', default=None,
                    help='Modalities for train/val. If not set, inferred automatically from --slice_ckpt_dir args.json.')
 
-    # ── Volume aggregator ──────────────────────────────────────────────────────
     p.add_argument('--attn_dim', type=int, default=256,
                    help='Hidden dim for the gated Z-aggregator')
     p.add_argument('--dropout',  type=float, default=0.25)
 
-    # ── Training ─────────────────────────────────────────────────────────────
     p.add_argument('--epochs',       type=int,   default=60)
     p.add_argument('--batch_size',   type=int,   default=16,
                    help='Volumes per batch (keep small because K slices each)')
@@ -94,37 +68,28 @@ def get_args() -> argparse.Namespace:
     p.add_argument('--weight_decay', type=float, default=1e-4)
     p.add_argument('--balance_classes', action='store_true', default=True)
 
-    # ── Scheduler / early stopping ────────────────────────────────────────────
     p.add_argument('--scheduler',      action='store_true', default=True)
     p.add_argument('--patience',       type=int, default=15)
     p.add_argument('--warmup_epochs',  type=int, default=3)
 
-    # ── Misc ─────────────────────────────────────────────────────────────────
     p.add_argument('--amp',            action='store_true', default=True)
     p.add_argument('--num_workers',    type=int, default=4)
     p.add_argument('--seed',           type=int, default=42)
     p.add_argument('--gpu_id',         type=int, default=None)
     p.add_argument('--run_name',       type=str, default=None)
 
-    # ── Visualisation ─────────────────────────────────────────────────────────
     p.add_argument('--vis_every',     type=int, default=5,
                    help='Save visualisations every N epochs (0 = never)')
 
-    # ── WandB ────────────────────────────────────────────────────────────────
-    p.add_argument('--wandb_mode', default='online', choices=['online', 'offline', 'disabled'],
-                   help='WandB logging mode')
+    p.add_argument('--wandb_mode', default='disabled', choices=['online', 'offline', 'disabled'],
+                   help='WandB logging mode (pass "online" to enable)')
     p.add_argument('--debug',      action='store_true',
                    help='Debug mode: sets wandb_mode to disabled')
 
     return p.parse_args()
 
 
-# =============================================================================
-#  Data utilities
-# =============================================================================
-
 def build_dataloaders(args: argparse.Namespace, sargs: dict):
-    """Build train / in_valid / valid / test DataLoaders for VolumeDataset."""
     patch_size = sargs['patch_size']
     stride     = sargs.get('stride') or (patch_size // 2)
 
@@ -163,12 +128,7 @@ def build_dataloaders(args: argparse.Namespace, sargs: dict):
     return dl_train, dl_in_valid, dl_valid, dl_test
 
 
-# =============================================================================
-#  Pd@1% helper
-# =============================================================================
-
 def _pd_at_1pct(y_true, y_score):
-    """TPR at 1% FPR on the ROC curve (Pd@1%)."""
     if len(np.unique(y_true)) < 2:
         return float('nan')
     fpr, tpr, _ = roc_curve(np.array(y_true), np.array(y_score))
@@ -176,9 +136,7 @@ def _pd_at_1pct(y_true, y_score):
     return float(tpr[idx])
 
 
-# =============================================================================
 #  Balanced per-modality metrics helper
-# =============================================================================
 
 def _balanced_mod_metrics(
     bin_labels: np.ndarray,
@@ -188,7 +146,6 @@ def _balanced_mod_metrics(
     mod:        str,
     seed:       int = 42,
 ) -> dict:
-    """AUC/ACC/F1/AP/Pd@1% for `mod` vs real using equal balanced sampling (fixed seed)."""
     real_idx = np.where(mods_arr == 'real')[0]
     fake_idx = np.where(mods_arr == mod)[0]
     if len(fake_idx) == 0 or len(real_idx) == 0:
@@ -215,13 +172,9 @@ def _balanced_mod_metrics(
     }
 
 
-# =============================================================================
-#  Evaluate
-# =============================================================================
-
 @torch.no_grad()
 def evaluate(
-    model: VolumeClassifier,
+    model: HexMIL,
     dataloader: DataLoader,
     criterion: nn.BCEWithLogitsLoss,
     device: torch.device,
@@ -280,12 +233,8 @@ def evaluate(
     return metrics
 
 
-# =============================================================================
-#  Training
-# =============================================================================
-
 def train_one_epoch(
-    model: VolumeClassifier,
+    model: HexMIL,
     dataloader: DataLoader,
     criterion: nn.BCEWithLogitsLoss,
     optimiser: torch.optim.Optimizer,
@@ -332,9 +281,7 @@ def train_one_epoch(
             'total': running_loss / max(n_batches, 1)}
 
 
-# =============================================================================
 #  Periodic visualisation: β heatmaps per volume
-# =============================================================================
 
 def _get_ty(img_id: str) -> str:
     return 'removal' if str(img_id).startswith('rem_') else 'injection'
@@ -346,7 +293,6 @@ _VIS_TYS      = ['removal', 'injection']
 
 
 def _smooth_attn(a: np.ndarray) -> np.ndarray:
-    """Smooth a 2-D attention map and renormalise to [0, 1]."""
     from scipy.ndimage import gaussian_filter
     sigma = max(1.0, max(a.shape) * 0.03)
     a = gaussian_filter(a.astype(np.float32), sigma=sigma)
@@ -355,25 +301,14 @@ def _smooth_attn(a: np.ndarray) -> np.ndarray:
 
 
 def compute_xai_metrics(heatmap: np.ndarray, mask: np.ndarray) -> dict:
-    """
-    Compute pixel-level XAI localisation metrics for a single 2-D slice.
-
-    Args:
-        heatmap: float32 (H, W)   — already in [0,1]
-        mask:    float32 (H, W)   — binary GT mask
-
-    Returns dict with: pixel_auc, iou_03, iou_05, iou_07, pointing_game
-    """
     result = {}
     m_bin = (mask > 0.5).astype(bool)
 
-    # Pixel-level ROC AUC
     if m_bin.sum() > 0 and (~m_bin).sum() > 0:
         result['pixel_auc'] = float(roc_auc_score(m_bin.ravel(), heatmap.ravel()))
     else:
         result['pixel_auc'] = float('nan')
 
-    # IoU at thresholds
     for thr in [0.3, 0.5, 0.7]:
         h_bin = heatmap >= thr
         inter = (h_bin & m_bin).sum()
@@ -387,9 +322,7 @@ def compute_xai_metrics(heatmap: np.ndarray, mask: np.ndarray) -> dict:
     return result
 
 
-# =============================================================================
 #  3-D visualisation utilities (shared by train & eval)
-# =============================================================================
 
 def _norm01(x: np.ndarray) -> np.ndarray:
     lo, hi = x.min(), x.max()
@@ -404,7 +337,6 @@ def _build_volume_3d(
     stride:      int,
     valid_mask:  np.ndarray,      # (K,) bool
 ) -> np.ndarray:                  # (K, H, W) float32
-    """Reconstruct a 3-D volume by averaging overlapping patches slice by slice."""
     K    = patches_cpu.shape[0]
     H, W = slice_hw
     vol  = np.zeros((K, H, W), dtype=np.float32)
@@ -438,7 +370,6 @@ def _build_heatmap_3d(
     stride:      int,
     valid_mask:  np.ndarray,      # (K,) bool
 ) -> np.ndarray:                  # (K, H, W) float32
-    """Build β-weighted per-slice attention heatmap volume."""
     K    = len(alpha_cpu)
     H, W = slice_hw
     hmap = np.zeros((K, H, W), dtype=np.float32)
@@ -452,7 +383,6 @@ def _build_heatmap_3d(
 
 
 def _smooth_3d(hmap3d: np.ndarray) -> np.ndarray:
-    """Apply per-slice Gaussian smoothing and normalise whole volume to [0, 1]."""
     from scipy.ndimage import gaussian_filter
     out = np.zeros_like(hmap3d)
     for k in range(hmap3d.shape[0]):
@@ -479,7 +409,6 @@ def _save_volume_gif(
     save_path:   Path,
     duration_ms: int = 250,
 ) -> None:
-    """Animated GIF scrolling through K axial slices (used by eval_volume.py)."""
     try:
         from PIL import Image
         import io
@@ -534,11 +463,6 @@ def save_nodule_grid(
     filename:        str = 'nodule_grid.png',
     in_domain_fakes: set | None = None,
 ) -> None:
-    """
-    5 rows × 12 cols nodule-context summary grid (Stage 2).
-    Rows (top→bottom): z+2 | z+1 | ★ nodule (bbox) | z-1 | z-2
-    Col groups (×4 mods): [ CT  |  Attention  |  Overlay ]
-    """
     try:
         import matplotlib
         matplotlib.use('Agg')
@@ -694,10 +618,6 @@ def _save_combined_gif(
     save_path:       Path,
     duration_ms:     int = 300,
 ) -> None:
-    """
-    Single animated GIF showing real | in-domain | OOD side-by-side.
-    Each frame = one z slice (CT overlay), 4 columns separated by colored bars.
-    """
     try:
         from PIL import Image, ImageDraw
         import io
@@ -790,20 +710,12 @@ def _save_combined_gif(
 
 
 def save_epoch_vis(
-    model:      VolumeClassifier,
+    model:      HexMIL,
     dataloader: DataLoader,
     device:     torch.device,
     vis_dir:    Path,
     sargs:      dict,
 ) -> None:
-    """
-    Save one animated GIF per modality detected in the dataloader.
-    Each GIF scrolls through K slices; each frame shows:
-      Fake mods: 2 rows x 3 cols (row 0 = removal, row 1 = injection)
-      Real mod:  1 row x 3 cols
-    Columns: CT + GT contour | Attention | Overlay
-    Files: vis_dir/{mod}.gif
-    """
     vis_dir.mkdir(parents=True, exist_ok=True)
     patch_size = sargs['patch_size']
     stride     = sargs.get('stride') or (patch_size // 2)
@@ -863,12 +775,6 @@ def _render_vol_gifs(
     vis_dir:     Path,
     duration_ms: int = 250,
 ) -> None:
-    """
-    Render one animated GIF per modality in vis_dir/{mod}.gif.
-    Fake mods: 2 rows x 3 cols (removal | injection), animated together.
-    Real mod:  1 row x 3 cols.
-    Columns: CT + GT contour | Attention | Overlay.
-    """
     try:
         from PIL import Image
         import io
@@ -956,9 +862,7 @@ def _render_vol_gifs(
                 duration=duration_ms, loop=0,
             )
 
-# =============================================================================
-#  Unified test evaluation (matches eval_volume-cls.py, full_volume=False)
-# =============================================================================
+#  Unified test evaluation (matches eval_volume.py, full_volume=False)
 
 @torch.no_grad()
 def run_test_evaluation_volume(
@@ -971,13 +875,6 @@ def run_test_evaluation_volume(
     sargs:           dict,
     in_domain_fakes: set | None = None,
 ) -> dict:
-    """
-    Full test evaluation. Saves to eval_dir/:
-        metrics.json      — nested {cls, xai}
-        per_sample.csv    — one row per volume block
-        {mod}.gif         — one animated GIF per modality
-    Returns the full results dict.
-    """
     eval_dir.mkdir(parents=True, exist_ok=True)
 
     patch_size = sargs['patch_size']
@@ -1071,7 +968,6 @@ def run_test_evaluation_volume(
                     'masks_3d':   masks_cpu,
                 }
 
-    # ── Aggregate metrics ─────────────────────────────────────────────────────
     all_logits_np = torch.stack(all_logits).numpy()
     all_labels_np = torch.stack(all_labels).numpy()   # binary (0/1)
     probs         = sigmoid_np(all_logits_np)
@@ -1114,18 +1010,15 @@ def run_test_evaluation_volume(
         'xai':     xai_metrics,
     }
 
-    # ── Save metrics.json ─────────────────────────────────────────────────────
     with open(eval_dir / 'metrics.json', 'w') as f:
         json.dump(results, f, indent=2, default=str)
     print(f"  Metrics JSON  → {eval_dir / 'metrics.json'}")
 
-    # ── Save per_sample.csv ───────────────────────────────────────────────────
     if per_sample_records:
         import pandas as pd
         pd.DataFrame(per_sample_records).to_csv(eval_dir / 'per_sample.csv', index=False)
         print(f"  Per-sample CSV → {eval_dir / 'per_sample.csv'}")
 
-    # ── Visualization GIFs (one per modality) ────────────────────────────────
     _render_vol_gifs(cands, eval_dir)
     print(f"  Vis GIFs          -> {eval_dir}/<mod>.gif")
 
@@ -1133,19 +1026,9 @@ def run_test_evaluation_volume(
     return results
 
 
-# =============================================================================
 #  Champion / Challenger promotion
-# =============================================================================
 
 def promote_if_better(temp_dir: Path, canonical_dir: Path) -> None:
-    """
-    Compare the challenger run (temp_dir) against the existing canonical model
-    (canonical_dir) using test accuracy stored in test_metrics.json.
-
-      - No canonical exists              -> rename temp to canonical.
-      - Challenger test acc >= champion  -> replace canonical with temp.
-      - Otherwise                        -> delete temp, leave canonical unchanged.
-    """
     def _test_acc(run_dir: Path) -> float:
         jf = run_dir / 'evaluation' / 'metrics.json'
         if not jf.exists():
@@ -1185,32 +1068,25 @@ def promote_if_better(temp_dir: Path, canonical_dir: Path) -> None:
         print(f'  ✓ Canonical unchanged: {canonical_dir}')
 
 
-# =============================================================================
-#  Main
-# =============================================================================
-
 def main(args: argparse.Namespace) -> None:
+    require_data_dir()
 
-    # ── Debug mode ────────────────────────────────────────────────────────────
     if args.debug:
         args.wandb_mode = 'disabled'
 
-    # ── Seed ─────────────────────────────────────────────────────────────────
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(args.seed)
 
-    # ── Device ───────────────────────────────────────────────────────────────
     if args.gpu_id is not None:
         device = torch.device(f'cuda:{args.gpu_id}')
     else:
         gid    = select_best_gpu()
         device = torch.device(f'cuda:{gid}') if gid is not None else torch.device('cpu')
 
-    # ── Load Stage 1 checkpoint + build model ────────────────────────────────
     print(f"\nLoading Stage 1 checkpoint from: {args.slice_ckpt_dir}")
-    model, sargs = build_volume_classifier(
+    model, sargs = build_hexmil(
         slice_ckpt_dir = args.slice_ckpt_dir,
         K              = args.K,
         attn_dim       = args.attn_dim,
@@ -1218,7 +1094,6 @@ def main(args: argparse.Namespace) -> None:
         device         = device,
     )
 
-    # ── Auto-infer --mods from slice checkpoint if not explicitly passed ──────
     _slice_args = json.loads((Path(args.slice_ckpt_dir) / 'args.json').read_text())
     if args.mods is None:
         _slice_fake = [m for m in (_slice_args.get('mods') or []) if m != 'real']
@@ -1241,22 +1116,20 @@ def main(args: argparse.Namespace) -> None:
     print(f"  LR={args.lr}  WD={args.weight_decay}  BS={args.batch_size}  epochs={args.epochs}")
     print(f"  AMP={args.amp}  balance={args.balance_classes}  seed={args.seed}")
 
-    # Trainable parameter count
     n_train = sum(p.numel() for p in model.parameters() if p.requires_grad)
     n_total = sum(p.numel() for p in model.parameters())
     print(f"  Params:        {n_train:,} trainable / {n_total:,} total\n")
 
-    # ── Run name ─────────────────────────────────────────────────────────────
     all_fake      = set(ALL_FAKES)
     fake_mods_set = {m for m in args.mods if m != 'real'}
     mods_tag      = 'all' if fake_mods_set == all_fake else '+'.join(sorted(fake_mods_set))
     attn_tag      = '_attn' if _slice_args.get('aux_attn_loss') else ''
-    base_dir      = Path(WORK_DIR) / 'runs' / f"volume-cls_{backbone_tag}_p{patch_size}_s{stride}_K{args.K}{attn_tag}"
+    base_dir      = Path(WORK_DIR) / 'runs' / f"hexmil_{backbone_tag}_p{patch_size}_s{stride}_K{args.K}{attn_tag}"
 
     if args.run_name is None:
         run_tag     = f"trained_on_{mods_tag}_bce_bs{args.batch_size}_lr{args.lr}{attn_tag}"
         wandb_group = f"trained_on_{mods_tag}"
-        wandb_name  = f"volume-cls_{backbone_tag}_p{patch_size}_s{stride}_K{args.K}_bce_bs{args.batch_size}_lr{args.lr}{attn_tag}"
+        wandb_name  = f"hexmil_{backbone_tag}_p{patch_size}_s{stride}_K{args.K}_bce_bs{args.batch_size}_lr{args.lr}{attn_tag}"
     else:
         run_tag     = args.run_name
         wandb_group = f"trained_on_{mods_tag}"
@@ -1272,17 +1145,14 @@ def main(args: argparse.Namespace) -> None:
     with open(out_dir / 'args.json', 'w') as f:
         json.dump(full_args, f, indent=2)
 
-    # ── WandB ────────────────────────────────────────────────────────────────
     if args.wandb_mode != 'disabled':
         import wandb
         wandb.init(project='MedForensics', group=wandb_group, name=wandb_name, config=vars(args), mode=args.wandb_mode)
 
-    # ── Data ─────────────────────────────────────────────────────────────────
     print("Loading data...")
     dl_train, dl_in_valid, dl_valid, dl_test = build_dataloaders(args, sargs)
     print()
 
-    # ── Optimiser & criterion ─────────────────────────────────────────────────
     criterion = nn.BCEWithLogitsLoss()
     optimiser = torch.optim.AdamW(
         [p for p in model.parameters() if p.requires_grad],
@@ -1296,7 +1166,6 @@ def main(args: argparse.Namespace) -> None:
     )
     scaler = torch.amp.GradScaler('cuda', enabled=args.amp)
 
-    # ── Training loop ────────────────────────────────────────────────────────
     best_val_loss    = float('inf')
     patience_counter = 0
     history          = []
@@ -1306,7 +1175,6 @@ def main(args: argparse.Namespace) -> None:
     for epoch in range(1, args.epochs + 1):
         t0 = time.time()
 
-        # Warmup
         if epoch <= args.warmup_epochs:
             wlr = args.lr * (epoch / args.warmup_epochs)
             for pg in optimiser.param_groups:
@@ -1341,7 +1209,6 @@ def main(args: argparse.Namespace) -> None:
                                  for k in ['auc', 'acc', 'ap', 'f1'])
                 print(f"  {m:<12s}{tag}  AUC {a:.4f}  Acc {ac:.4f}  AP {ap:.4f}  F1 {f1:.4f}")
 
-        # Visualisation
         if args.vis_every > 0 and epoch % args.vis_every == 0:
             ep_vis_dir = out_dir / 'vis' / f'epoch_{epoch:03d}'
             try:
@@ -1358,7 +1225,6 @@ def main(args: argparse.Namespace) -> None:
             except Exception as e:
                 print(f"  [WARN] save_epoch_vis failed at epoch {epoch}: {e}")
 
-        # WandB
         if args.wandb_mode != 'disabled':
             import wandb
             log_d = {
@@ -1386,7 +1252,6 @@ def main(args: argparse.Namespace) -> None:
             'time_s':        elapsed,
         })
 
-        # Checkpoint
         if val_metrics['loss'] < best_val_loss:
             best_val_loss    = val_metrics['loss']
             patience_counter = 0
@@ -1409,7 +1274,7 @@ def main(args: argparse.Namespace) -> None:
     with open(out_dir / 'history.json', 'w') as f:
         json.dump(history, f, indent=2, default=str)
 
-    # ── Test evaluation → evaluation/ (matches eval_volume-cls.py, full_volume=False) ─
+    # ── Test evaluation → evaluation/ (matches eval_volume.py, full_volume=False) ─
     print(f"\n{'='*60}")
     print("  Test Evaluation (best model)")
     print(f"{'='*60}\n")

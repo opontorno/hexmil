@@ -1,17 +1,4 @@
 #!/usr/bin/env python3
-"""
-inference.py
-============
-Single-volume inference for a trained HexMIL (Stage 2) checkpoint.
-
-Reads all hyperparameters from the run's args.json. Divides the volume
-into non-overlapping K-slice windows and aggregates via max-score pooling.
-
-Usage:
-    python inference.py --run_dir runs/volume-cls_resnet50_p64_s32_K32/trained_on_all \\
-        --scan_dir /path/to/volume/scan [--label_dir /path/to/label] \\
-        [--out_dir /path/to/output] [--save_3d] [--gpu_id 0]
-"""
 
 from __future__ import annotations
 
@@ -29,7 +16,7 @@ from scipy.special import expit as sigmoid_np
 from tqdm import tqdm
 
 from hexmil.data.slice_dataset import reconstruct_heatmap, build_patch_grid
-from hexmil.models.volume_classifier import VolumeClassifier, build_volume_classifier
+from hexmil.models.hexmil import HexMIL, build_hexmil
 from hexmil.utils.tiff_utils import (
     get_shape_tiff_scan,
     load_slice_tiff_scan,
@@ -37,13 +24,8 @@ from hexmil.utils.tiff_utils import (
     apply_percentile,
 )
 
-# ── paths ─────────────────────────────────────────────────────────────────────
 WORK_DIR = Path(__file__).resolve().parent
 
-
-# =============================================================================
-#  Args
-# =============================================================================
 
 def get_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description='ABMIL single-volume inference')
@@ -56,7 +38,6 @@ def get_args() -> argparse.Namespace:
     p.add_argument('--out_dir',   type=str, default=None,
                    help='Output directory (default: WORK_DIR/.pictures/<vol_name>/)')
     p.add_argument('--gpu_id',    type=int, default=None)
-    # ── visualisation flags ───────────────────────────────────────────────────
     p.add_argument('--save_3d',        action='store_true',
                    help='Save triplanar MIP + 3D scatter projection')
     p.add_argument('--save_nifti',     action='store_true',
@@ -73,9 +54,7 @@ def get_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-# =============================================================================
-#  Visualisation helpers  (standalone; duplicated from eval_volume-cls.py)
-# =============================================================================
+#  Visualisation helpers  (standalone; duplicated from eval_volume.py)
 
 def _norm01(x: np.ndarray) -> np.ndarray:
     lo, hi = x.min(), x.max()
@@ -127,14 +106,11 @@ def _smooth_3d(hmap3d: np.ndarray) -> np.ndarray:
     return (out - lo) / (hi - lo + 1e-8)
 
 
-
 def _mean_proj(vol3d: np.ndarray) -> tuple:
     return vol3d.mean(axis=0), vol3d.mean(axis=1), vol3d.mean(axis=2)
 
 
 def _masked_mean_proj(hm_filt: np.ndarray, axis: int):
-    """Mean over above-threshold voxels only (zeros excluded from average).
-    Returns a numpy masked array — zero positions are transparent in imshow."""
     import numpy.ma as ma
     count  = (hm_filt > 0).sum(axis=axis).astype(np.float32)
     total  = hm_filt.sum(axis=axis)
@@ -331,7 +307,6 @@ def save_volume_3d_projection(
 
     K_vol, H, W = hm.shape
 
-    # ── CT wall projections (3 planes) ────────────────────────────────
     xr = np.arange(W); yr = np.arange(H); zr = np.arange(K_vol)
     Xw,  Yw  = np.meshgrid(xr, yr)
     Xw2, Zw2 = np.meshgrid(xr, zr)
@@ -340,7 +315,6 @@ def save_volume_3d_projection(
     ax3d.contourf(np.rot90(Xw2, 2),   np.rot90(ct_co, 2),   Zw2,                     zdir='y', offset=0, cmap='gray', alpha=0.35, levels=20)
     ax3d.contourf(np.rot90(ct_sa, 2),   np.rot90(Yw3, 2),   Zw3,                     zdir='x', offset=0, cmap='gray', alpha=0.35, levels=20)
 
-    # ── 3-D bounding box (red fill + orange edges + wall projections) ──────
     if _att_bbox:
         bx0, bx1 = _att_bbox['x']
         by0, by1 = _att_bbox['y']
@@ -364,7 +338,6 @@ def save_volume_3d_projection(
             [[bx0,0,bz0],[bx1,0,bz0],[bx1,0,bz1],[bx0,0,bz1]]], **proj_kw))
         ax3d.add_collection3d(Poly3DCollection([  # sagittal wall (x=0)
             [[0,by0,bz0],[0,by1,bz0],[0,by1,bz1],[0,by0,bz1]]], **proj_kw))
-        # wireframe edges
         for xs, ys, zs in [
             ([bx0,bx1],[by0,by0],[bz0,bz0]), ([bx0,bx1],[by1,by1],[bz0,bz0]),
             ([bx0,bx1],[by0,by0],[bz1,bz1]), ([bx0,bx1],[by1,by1],[bz1,bz1]),
@@ -399,12 +372,6 @@ def save_attn_3d_projection(
     proj_thresh: float = 0.2,
     show_title:  bool  = False,
 ) -> None:
-    """
-    1 row × 4 cols: CT mean projections (gray) + filtered attention overlay (turbo).
-    Col 3: attention wall projections (turbo) + 3D scatter of attention voxels above attn_thresh.
-    proj_thresh: minimum attention value shown in projections and 3D walls.
-    attn_thresh: used only for bbox/scatter.
-    """
     import matplotlib.gridspec as gridspec
     from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
 
@@ -536,19 +503,6 @@ def save_slice_attention_grid(
                                 # normalised internally and shown on β bar
     alpha_thresh: float = 0.5,  # shown as horizontal dashed line on α bar chart
 ) -> None:
-    """
-    4-col × 7-row grid centred on the slice with highest beta.
-    Col 0: β scalar bar (threshold marker) + α bar chart (per-patch, raster order)
-    Col 1: CT slice
-    Col 2: alpha spatial heatmap (turbo)  — blank for low-beta rows
-    Col 3: CT + alpha overlay             — overlay only for beta >= beta_thresh
-    Centre row (ri=3) = argmax(beta), surrounded by ±1, ±2, ±3 slices.
-
-    α bar chart: one bar per patch, ordered left-to-right top-to-bottom (raster).
-    Bars are coloured with the turbo colormap (same as Col 2) so high-attention
-    patches naturally stand out.
-    β threshold is shown as a dashed vertical line on the same 0-1 scale as the bar.
-    """
     import matplotlib.gridspec as gridspec
     from matplotlib.gridspec import GridSpecFromSubplotSpec
     import matplotlib.cm as mcm
@@ -572,7 +526,6 @@ def save_slice_attention_grid(
     # normalise the absolute threshold onto the same 0-1 scale as beta_n
     beta_thresh_n = beta_thresh / max(float(beta_full.max()), 1e-8)
 
-    # ── Patch grid layout (same logic as _build_volume_3d) ────────────────
     half    = patch_size // 2
     ys_c    = sorted(set(list(range(half, H - half + 1, stride)) + [H - half]))
     xs_c    = sorted(set(list(range(half, W - half + 1, stride)) + [W - half]))
@@ -601,7 +554,6 @@ def save_slice_attention_grid(
         else:
             alpha_map = np.zeros_like(hm_sl)
 
-        # ── Col 0: β bar (top)  +  α bar chart per patch (bottom) ────────
         gs_c0 = GridSpecFromSubplotSpec(
             2, 1, subplot_spec=gs[ri, 0],
             height_ratios=[1, 3], hspace=0.06,
@@ -670,7 +622,6 @@ def save_slice_attention_grid(
                   color='red', fontweight='bold',
                   transform=ax0a.transAxes)
 
-        # ── Col 1: CT slice ───────────────────────────────────────────────
         ax1 = fig.add_subplot(gs[ri, 1])
         ax1.imshow(ct_sl, cmap='gray', vmin=0, vmax=1,
                    origin='upper', aspect='auto')
@@ -678,7 +629,6 @@ def save_slice_attention_grid(
         if ri == 0:
             ax1.set_title(col_titles[1], fontsize=30, color='black', pad=6)
 
-        # ── Col 2: α heatmap (original) ───────────────────────────────────
         ax2 = fig.add_subplot(gs[ri, 2])
         if beta_n[z] >= beta_thresh_n:
             ax2.imshow(hm_sl, cmap='turbo', vmin=0.0, vmax=hm_vmax,
@@ -690,7 +640,6 @@ def save_slice_attention_grid(
         if ri == 0:
             ax2.set_title(col_titles[2], fontsize=30, color='black', pad=6)
 
-        # ── Col 3: Overlay (original) ─────────────────────────────────────
         ax3 = fig.add_subplot(gs[ri, 3])
         ax3.imshow(ct_sl, cmap='gray', vmin=0, vmax=1,
                    origin='upper', aspect='auto')
@@ -748,12 +697,6 @@ def save_combined_3d_projection(
     proj_thresh: float = 0.2,
     show_title:  bool  = False,
 ) -> None:
-    """
-    3 rows × 4 cols combined figure:
-      Row 0: CT mean projections (axial, coronal, sagittal) | col 3 empty
-      Row 1: CT + filtered attention overlay (3 views)      | col 3: 3D attention scatter
-      Row 2: CT + attention bbox (3 views)                  | col 3: 3D attention bbox cube
-    """
     import matplotlib.gridspec as gridspec
     import matplotlib.patches as mpatches
     from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
@@ -762,7 +705,6 @@ def save_combined_3d_projection(
     hm     = np.clip(heatmap_3d, 0.0, 1.0)
     gt_str = ('real' if label == 0 else mod) if label is not None else None
     pr_str = 'FAKE' if prob > 0.5 else 'REAL'
-    # CT mean projections
     ct_ax, ct_co, ct_sa = _mean_proj(_norm01(volume_3d))
     ct_imgs = [ct_ax, ct_co, ct_sa]
 
@@ -780,7 +722,6 @@ def save_combined_3d_projection(
     hm_filt = hm.copy()
     hm_filt[hm_filt < attn_thresh] = 0.0
 
-    # Attention bounding box
     _hm_mask = hm > max(attn_thresh, 0.05)
     if _hm_mask.any():
         _az, _ay, _ax_b = np.where(_hm_mask)
@@ -812,7 +753,6 @@ def save_combined_3d_projection(
 
     ax_left = {}   # leftmost ax per row — used later for label alignment
 
-    # ── Row 0: plain CT projections ──────────────────────────────────────
     for ci in range(3):
         ax = fig.add_subplot(gs[0, ci])
         ax.imshow(ct_imgs[ci], cmap='gray', origin='upper', aspect='auto')
@@ -820,7 +760,6 @@ def save_combined_3d_projection(
         ax.axis('off')
         if ci == 0:
             ax_left[0] = ax
-    # ── Row 1: CT + filtered attention overlay ────────────────────────────
     for ci in range(3):
         ax = fig.add_subplot(gs[1, ci])
         ax.imshow(ct_imgs[ci], cmap='gray', origin='upper', aspect='auto')
@@ -885,14 +824,12 @@ def save_combined_3d_projection(
         ax.invert_yaxis()
         ax.dist = 7
 
-    # ── 3D panel 1: CT walls + attention projections + scatter ───────────
     _setup_3d(ax3d_attn)
     _ct_walls(ax3d_attn)
     _attn_walls(ax3d_attn)
     _scatter_attn(ax3d_attn, s=1.5, alpha=0.7)
     _finalize_3d(ax3d_attn)
 
-    # ── Row 2: CT + bboxes ────────────────────────────────────────────────
     for ci in range(3):
         ax = fig.add_subplot(gs[2, ci])
         ax.imshow(ct_imgs[ci], cmap='gray', origin='upper', aspect='auto')
@@ -916,7 +853,6 @@ def save_combined_3d_projection(
                     lw=2, edgecolor='darkorange', facecolor='red', alpha=0.25))
         ax.axis('off')
 
-    # ── 3D panel 2: CT walls + bbox only (like _3d.png) ──────────────────
     _setup_3d(ax3d_bb)
     _ct_walls(ax3d_bb)
     if _att_bbox:
@@ -953,7 +889,6 @@ def save_combined_3d_projection(
             ax3d_bb.plot3D(xs, ys, zs, color='darkorange', lw=3.0, zorder=10)
     _finalize_3d(ax3d_bb)
 
-    # ── Row labels centred on each row + colorbar right of 3D ────────────
     fig.canvas.draw()   # force layout so get_position() is accurate
 
     # tighten layout: move both 3D panels slightly left, closer to 2D grid
@@ -990,13 +925,9 @@ def save_combined_3d_projection(
     print(f"  → Combined 3D projection: {save_path}")
 
 
-# =============================================================================
-#  Inference core
-# =============================================================================
-
 @torch.no_grad()
 def run_inference(
-    model:              VolumeClassifier,
+    model:              HexMIL,
     scan_dir:           str,
     label_dir:          str | None,
     device:             torch.device,
@@ -1006,18 +937,6 @@ def run_inference(
     beta_thresh:        float = 0.0,
     win_stride:         int | None = None,
 ) -> dict:
-    """
-    Full-volume sliding-window inference.
-
-    Args:
-        win_stride: step between window starts in slices.
-                    Default (None) → K (non-overlapping).
-                    Use K//2 for 50% overlap; overlapping slices are averaged
-                    in the 3D heatmap and beta arrays.
-
-    Returns dict with vol_score, pred, vol_full, hm_full, beta_full,
-    valid_full, mask_full, z_indices_full, Z_total, H, W.
-    """
     shape         = get_shape_tiff_scan(scan_dir)
     Z_total, H, W = shape
     low, high     = get_percentile_tiff_scan(scan_dir, np.uint16)
@@ -1118,10 +1037,6 @@ def run_inference(
     }
 
 
-# =============================================================================
-#  Main
-# =============================================================================
-
 def main() -> None:
     args = get_args()
 
@@ -1142,7 +1057,6 @@ def main() -> None:
     patch_size = sargs['patch_size']
     stride     = sargs.get('stride') or (patch_size // 2)
 
-    # ── Device ────────────────────────────────────────────────────────────
     if args.gpu_id is not None:
         device = torch.device(f'cuda:{args.gpu_id}')
     elif torch.cuda.is_available():
@@ -1163,10 +1077,9 @@ def main() -> None:
     print(f"  Device:  {device}")
     print(f"  K={K}  patch_size={patch_size}  stride={stride}\n")
 
-    # ── Load model ────────────────────────────────────────────────────────
     slice_ckpt_dir = saved_args.get('slice_ckpt_dir', '')
     if slice_ckpt_dir and Path(slice_ckpt_dir).exists():
-        model, _ = build_volume_classifier(
+        model, _ = build_hexmil(
             slice_ckpt_dir = slice_ckpt_dir,
             K              = K,
             attn_dim       = saved_args.get('attn_dim', 256),
@@ -1175,8 +1088,8 @@ def main() -> None:
         )
     else:
         print("[WARN] slice_ckpt_dir not found; rebuilding slice encoder from sargs only")
-        from hexmil.models.abmil_slice_classifier import build_abmil_classifier_scratch
-        slice_model = build_abmil_classifier_scratch(
+        from hexmil.models.slicemil import build_slicemil
+        slice_model = build_slicemil(
             backbone   = sargs.get('backbone',   'resnet50'),
             pretrained = False,
             patch_size = sargs.get('patch_size', 64),
@@ -1184,7 +1097,7 @@ def main() -> None:
             attn_dim   = sargs.get('attn_dim',   256),
             dropout    = sargs.get('dropout',    0.25),
         )
-        model = VolumeClassifier(
+        model = HexMIL(
             slice_encoder = slice_model,
             feat_dim      = slice_model.feat_dim,
             K             = K,
@@ -1198,7 +1111,6 @@ def main() -> None:
     print(f"Loaded checkpoint from epoch {ckpt.get('epoch', '?')} "
           f"(val_loss={ckpt.get('best_val_loss', float('nan')):.4f})\n")
 
-    # ── Auto-detect label dir from scan path if not provided ──────────────
     label_dir = args.label_dir
     if label_dir is None:
         _auto = args.scan_dir.replace('/scan/', '/label/')
@@ -1206,7 +1118,6 @@ def main() -> None:
             label_dir = _auto
             print(f"  [auto] label_dir detected: {label_dir}")
 
-    # ── Run inference ─────────────────────────────────────────────────────
     results = run_inference(
         model              = model,
         scan_dir           = args.scan_dir,
@@ -1226,7 +1137,6 @@ def main() -> None:
 
     print(f"\n  vol_score = {vol_score:.4f}  →  {pred.upper()}\n")
 
-    # ── GIF ───────────────────────────────────────────────────────────────
     _save_volume_gif(
         volume_3d  = results['vol_full'],
         heatmap_3d = hm_smooth,
@@ -1241,7 +1151,6 @@ def main() -> None:
         save_path  = out_dir / f'{vol_name}.gif',
     )
 
-    # ── 3-D triplanar projection ───────────────────────────────────────────
     if args.save_3d:
         save_volume_3d_projection(
             volume_3d   = results['vol_full'],
@@ -1279,7 +1188,6 @@ def main() -> None:
             show_title  = args.show_title,
         )
 
-    # ── Slice attention grid ──────────────────────────────────────────────
     if args.save_3d:
         save_slice_attention_grid(
             volume_3d    = results['vol_full'],
@@ -1292,7 +1200,6 @@ def main() -> None:
             alpha_thresh = args.attn_thresh_3d,
         )
 
-    # ── NIfTI export ──────────────────────────────────────────────────────
     if args.save_nifti:
         save_as_nifti(
             volume_3d  = results['vol_full'],

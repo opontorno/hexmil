@@ -1,0 +1,11 @@
+# HexMIL dependencies are declared once, in pyproject.toml.
+# This file just installs the package (and its dependencies) in editable mode,
+# so `pip install -r requirements.txt` and `pip install -e .` are equivalent.
+#
+# Tip: for a CUDA-matched PyTorch build, install torch/torchvision first
+#      (see https://pytorch.org/get-started), then run this file.
+
+-e .
+
+# Optional extra: NIfTI export of 3D attention volumes (--save_nifti)
+# -e .[nifti]

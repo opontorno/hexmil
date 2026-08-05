@@ -1,13 +1,3 @@
-"""
-xai_utils.py
-------------
-Shared utilities for eval_xai.py and eval_xai_3d.py.
-
-Provides: normalisation helpers, patch-CAM reconstruction, Grad-CAM hooks,
-ABMIL/Grad-CAM heatmap extractors, bootstrap CI, FDR correction,
-pairwise statistical tests, and figure generation.
-"""
-
 from __future__ import annotations
 
 from itertools import combinations
@@ -22,17 +12,9 @@ from scipy.stats import wilcoxon
 from sklearn.metrics import roc_auc_score
 
 
-# ---------------------------------------------------------------------------
-# Type detection
-# ---------------------------------------------------------------------------
-
 def _get_ty(img_id: str) -> str:
     return 'removal' if str(img_id).startswith('rem_') else 'injection'
 
-
-# ---------------------------------------------------------------------------
-# Normalization and smoothing
-# ---------------------------------------------------------------------------
 
 def _normalize01(a: np.ndarray) -> np.ndarray:
     a = a.astype(np.float32)
@@ -46,17 +28,12 @@ def _smooth(a: np.ndarray, sigma_frac: float) -> np.ndarray:
     return _normalize01(a)
 
 
-# ---------------------------------------------------------------------------
-# Patch-CAM reconstruction
-# ---------------------------------------------------------------------------
-
 def _patch_cams_to_heatmap(
     cam_patches: np.ndarray,
     slice_hw: tuple[int, int],
     patch_size: int,
     stride: int,
 ) -> np.ndarray:
-    """Reconstruct full-res heatmap by averaging overlapping per-patch CAM maps."""
     H, W = slice_hw
     half  = patch_size // 2
     accum = np.zeros((H, W), dtype=np.float32)
@@ -84,10 +61,6 @@ def _patch_cams_to_heatmap(
     return accum / np.maximum(count, 1e-6)
 
 
-# ---------------------------------------------------------------------------
-# Grad-CAM hook infrastructure
-# ---------------------------------------------------------------------------
-
 class _FeatureStore:
     feat: torch.Tensor | None = None
 
@@ -107,10 +80,6 @@ def _register_gradcam_hook(model) -> tuple[_FeatureStore, list]:
     return store, [handle]
 
 
-# ---------------------------------------------------------------------------
-# Heatmap extractors
-# ---------------------------------------------------------------------------
-
 @torch.no_grad()
 def _abmil_heatmap(
     model,
@@ -123,7 +92,6 @@ def _abmil_heatmap(
     sigma_frac: float,
     reconstruct_heatmap_fn,
 ) -> np.ndarray:
-    """Native ABMIL attention heatmap (ante-hoc)."""
     _, attn_w = model(patches.unsqueeze(0).to(device), return_attn=True)
     hm = reconstruct_heatmap_fn(
         attn_w[0].detach().cpu().numpy(), grid_hw, slice_hw, patch_size, stride
@@ -141,7 +109,6 @@ def _gradcam_heatmap(
     sigma_frac: float,
     plusplus: bool = False,
 ) -> np.ndarray:
-    """Grad-CAM or Grad-CAM++ (plusplus=True) heatmap."""
     store, handles = _register_gradcam_hook(model)
 
     model.eval()
@@ -191,10 +158,6 @@ def _gradcam_heatmap(
     hm = _patch_cams_to_heatmap(cam_patches, slice_hw, patch_size, stride)
     return _smooth(hm, sigma_frac)
 
-
-# ---------------------------------------------------------------------------
-# Statistical functions
-# ---------------------------------------------------------------------------
 
 def _bootstrap_ci(
     values: np.ndarray,
@@ -329,10 +292,6 @@ def _summarize(
     return pd.DataFrame(rows)
 
 
-# ---------------------------------------------------------------------------
-# Paper figures
-# ---------------------------------------------------------------------------
-
 def _save_paper_figures(
     df: pd.DataFrame,
     summary_global: pd.DataFrame,
@@ -374,7 +333,6 @@ def _save_paper_figures(
         fig.savefig(p, dpi=dpi, bbox_inches='tight');  saved.append(p)
     plt.close(fig)
 
-    # 2) Per-sample boxplot
     fig, ax = plt.subplots(figsize=(8.8, 4.8))
     data = [df.loc[df['method'] == m, metric].dropna().to_numpy(dtype=np.float64) for m in methods]
     ax.boxplot(data, labels=methods, showfliers=False)

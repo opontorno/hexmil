@@ -1,21 +1,3 @@
-"""
-slice_dataset.py
-----------------
-Stage 1 (SliceMIL) dataset: MIL bag of patches from a full CT slice.
-
-For fake volumes, slices with sufficient GT mask coverage around coord_z are
-selected; for real volumes, slices are sampled uniformly at random.
-Each slice is tiled into N overlapping patches via a sliding window.
-
-Returns a dict with:
-    patches  – (N, 1, P, P)  patch bag
-    label    – 0=real, 1-4=fake modality (use label > 0 for binary)
-    mask     – (1, H, W)  GT manipulation mask
-    grid_hw  – [n_rows, n_cols]
-    slice_hw – [H, W]
-    mod, img_id, coord_z, ty
-"""
-
 from __future__ import annotations
 
 import os
@@ -35,33 +17,11 @@ from hexmil.utils.tiff_utils import (
 from hexmil.data.patch_dataset import MOD_LABEL, load_split_table   # re-export for convenience
 
 
-# ---------------------------------------------------------------------------
-#  Grid extraction helper
-# ---------------------------------------------------------------------------
-
 def build_patch_grid(
     arr: np.ndarray,   # (H, W) float32
     patch_size: int,
     stride: int,
 ) -> tuple[np.ndarray, list[tuple[int, int]], tuple[int, int]]:
-    """
-    Extract a regular grid of patches from a 2-D array using a sliding window.
-
-    Patches are centred at positions (cy, cx).  Centres are spaced `stride`
-    apart starting at `patch_size // 2` so the first patch is fully within the
-    image (with reflect-padding at the border if the slice is smaller than the
-    patch size).
-
-    Args:
-        arr:        (H, W) numpy array, any dtype.
-        patch_size: spatial size of each square patch.
-        stride:     step between consecutive patch centres.
-
-    Returns:
-        patches:   (N, patch_size, patch_size) float32 array
-        positions: list of (cy, cx) centre coordinates (length N)
-        grid_hw:   (n_rows, n_cols)
-    """
     H, W = arr.shape
     half  = patch_size // 2
 
@@ -111,13 +71,6 @@ def reconstruct_heatmap(
     patch_size: int,
     stride: int,
 ) -> np.ndarray:
-    """
-    Place per-patch scalar values back into a 2-D heatmap by averaging
-    contributions at each pixel position.
-
-    Returns:
-        heatmap: (H, W) float32 in [0, 1] after min-max normalisation.
-    """
     H, W = slice_hw
     n_rows, n_cols = grid_hw
     half  = patch_size // 2
@@ -152,44 +105,7 @@ def reconstruct_heatmap(
     return heatmap
 
 
-# ---------------------------------------------------------------------------
-#  Dataset
-# ---------------------------------------------------------------------------
-
 class SliceDataset(Dataset):
-    """
-    Stage 1 dataset — one sample = one axial slice as a MIL bag of patches.
-
-    Slice selection per volume
-    --------------------------
-    Fake volumes:
-        coord_z (the annotated manipulation centre) is always included.
-        Up to ``neighborhood_slices`` additional slices are drawn uniformly
-        at random from the neighbourhood window
-        [coord_z - neighborhood_radius, coord_z + neighborhood_radius],
-        clipped to [0, Z_total).  Total slices per fake volume =
-        1 + neighborhood_slices.
-
-    Real volumes:
-        ``1 + neighborhood_slices`` slices are drawn uniformly at random
-        from [0, Z_total) so the per-volume count matches fake volumes.
-
-    No 3-D mask loading at init: only volume shapes are read (fast header
-    reads), so dataset construction is near-instantaneous.
-
-    Args:
-        data_dir:             M3DSynth root directory.
-        tab:                  DataFrame from load_split_table() — one row per volume.
-        patch_size:           Spatial size of each patch (px).
-        stride:               Sliding-window step.  Default = patch_size // 2.
-        augment:              Random H/V flips (training only).
-        neighborhood_radius:  Half-width of the window around coord_z from which
-                              extra slices are sampled.  Default 5 → window of
-                              ±5 slices (10 candidates, manipulated in all
-                              typical M3DSynth volumes whose span ≈ 23 slices).
-        neighborhood_slices:  Number of extra slices sampled beyond coord_z.
-                              Default 4 → 5 slices per fake volume total.
-    """
 
     def __init__(
         self,
@@ -212,7 +128,6 @@ class SliceDataset(Dataset):
             neighborhood_slices,
         )
 
-    # ------------------------------------------------------------------
     def _build_samples(
         self,
         tab: pd.DataFrame,
@@ -220,17 +135,12 @@ class SliceDataset(Dataset):
         n_extra: int,
         seed: int = 42,
     ) -> list[dict]:
-        """
-        Expand the volume-level table into a flat list of (volume, slice_z) samples.
-        No mask loading — uses only volume shapes and coord_z from the CSV.
-        """
         rng     = np.random.default_rng(seed)
         samples: list[dict] = []
 
         fake_tab = tab[tab['mod'] != 'real']
         real_tab = tab[tab['mod'] == 'real']
 
-        # ── Fake volumes: coord_z + neighbourhood ────────────────────────
         for _, row in fake_tab.iterrows():
             mod    = row['mod']
             img_id = str(row['img_id'])
@@ -265,7 +175,6 @@ class SliceDataset(Dataset):
                     'ty':      ty_norm,
                 })
 
-        # ── Real volumes: sample enough slices to balance fake modalities ───
         # Each fake volume contributes (1 + n_extra) slices; there are
         # n_fake_mods fake modalities per real volume, so to equalise the
         # total fake/real sample count we sample (1 + n_extra) * n_fake_mods
@@ -298,7 +207,6 @@ class SliceDataset(Dataset):
               f'(fake: {n_fake}, real: {n_real})')
         return samples
 
-    # ------------------------------------------------------------------
     def __len__(self) -> int:
         return len(self.samples)
 
@@ -308,7 +216,6 @@ class SliceDataset(Dataset):
         img_id = s['img_id']
         cz     = s['slice_z']
 
-        # ── Load full axial slice ────────────────────────────────────────
         scan_dir  = os.path.join(self.data_dir, mod, 'scan', img_id)
         shape     = get_shape_tiff_scan(scan_dir)
         low, high = get_percentile_tiff_scan(scan_dir, np.uint16)
@@ -316,7 +223,6 @@ class SliceDataset(Dataset):
         scan_slice = load_slice_tiff_scan(scan_dir, shape, np.uint16, cz, cz + 1)[0]
         scan_slice = apply_percentile(scan_slice.astype(np.float32), low, high)
 
-        # ── Load GT mask for this slice ──────────────────────────────────
         if mod == 'real':
             mask_slice = np.zeros_like(scan_slice, dtype=np.float32)
         else:
@@ -324,7 +230,6 @@ class SliceDataset(Dataset):
             mask_slice = load_slice_tiff_scan(label_dir, shape, np.bool_, cz, cz + 1)[0]
             mask_slice = mask_slice.astype(np.float32)
 
-        # ── Slice-level augmentation (training only) ─────────────────────
         if self.augment:
             if np.random.rand() > 0.5:
                 scan_slice = np.flip(scan_slice, axis=0).copy()
@@ -333,7 +238,6 @@ class SliceDataset(Dataset):
                 scan_slice = np.flip(scan_slice, axis=1).copy()
                 mask_slice = np.flip(mask_slice, axis=1).copy()
 
-        # ── Build patch bag ──────────────────────────────────────────────
         patches, _positions, grid_hw = build_patch_grid(
             scan_slice, self.patch_size, self.stride
         )

@@ -4,17 +4,13 @@
 #
 #  Scripts covered:
 #      train_flat_cnn.py       — ResNet-50 (timm)
-#      train_pool_mil.py       — ResNet-50 MIL (timm + hexmil)
-#      train_vit_abmil.py      — ViT-B/16 ABMIL (timm + hexmil)
 #      train_3d_resnet.py      — R3D-18 (torchvision)
 #      train_3d_densenet.py    — DenseNet121-3D (monai)
-#      train_3d_efficientnet.py — EfficientNet-B0-3D (monai)
+#      train_3d_vit.py         — ViT-3D / factorised ViViT (torchvision + timm)
+#      train_3d_mvit.py        — MViT-V2-S (torchvision)
 #      train_trufor.py         — TruFor CMX-SegFormer (timm + yacs)
 #      train_mvssnet.py        — MVSS-Net ResNet-50 (git_repo/MVSS-Net)
-#      train_npr.py            — NPR ResNet-50 (git_repo/NPR-DeepfakeDetection)
-#      train_freqnet.py        — FreqNet (git_repo/FreqNet-DeepfakeDetection)
 #      train_d3.py             — D3 ResNet-50 LPF (git_repo/D3)
-#      train_deepfeaturex.py   — DeepFeatureX backbone (git_repo/DeepFeatureX-SN)
 #
 #  Install:
 #      conda run -n medsota pip install -r baselines/requirements_pytorch.txt
@@ -22,16 +18,12 @@
 
 # ── Core deep learning ────────────────────────────────────────────────────────
 torch>=2.0
-torchvision                 # R3D-18 (train_3d_resnet), standard CV ops
-timm                        # ResNet-50, ViT-B/16, dual_segformer (TruFor CMX)
+torchvision                 # R3D-18, MViT, Swin/ViT ops (3D baselines)
+timm                        # ResNet-50, ViT, dual_segformer (TruFor CMX)
 monai                       # DenseNet121-3D (train_3d_densenet)
-                            # EfficientNet-B0-3D (train_3d_efficientnet)
 
 # ── Repo-specific extras ──────────────────────────────────────────────────────
 yacs                        # train_trufor — CfgNode for TruFor EncoderDecoder config
-gdown==4.7.1                # git_repo/FreqNet — download pretrained weights from Drive
-IPython                      # git_repo/FreqNet — interactive debugging of pretrained weights
-matplotlib                 # git_repo/DeepFeatureX-SN — visualization of feature maps
 
 # ── Scientific computing ──────────────────────────────────────────────────────
 numpy
@@ -40,15 +32,16 @@ scikit-learn                # roc_auc_score, accuracy_score, f1_score, average_p
 scikit-image                # image resize ops (git_repo/D3 dependency)
 
 # ── Image I/O ─────────────────────────────────────────────────────────────────
-opencv-python               # git_repo/NPR, FreqNet, MVSS-Net dependency
-Pillow                      # git_repo/NPR, FreqNet dependency
+opencv-python               # git_repo/MVSS-Net dependency
+Pillow
 
 # ── Data handling ─────────────────────────────────────────────────────────────
 pandas                      # hexmil.data.patch_dataset / slice_dataset / volume_dataset
 h5py                        # auxiliary data loading
 
 # ── Experiment tracking ───────────────────────────────────────────────────────
-wandb                       # optional — all scripts support --use_wandb
+wandb
 
 # ── Utilities ─────────────────────────────────────────────────────────────────
 tqdm
+matplotlib

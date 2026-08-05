@@ -1,39 +1,4 @@
 #!/usr/bin/env python3
-"""
-train_mantranet.py
-==================
-ManTraNet (Wu et al., CVPR 2019) — Keras/TF, fine-tuned on M3DSynth.
-
-Uses the official ManTraNet model imported from the cloned repository
-(baselines/git_repo/ManTraNet/src/modelCore.py).
-
-The original code targets Keras 2.2 + TF 1.8.  A compatibility shim
-(installed before importing) maps the old ``keras.*`` imports to
-``tf.keras.*`` so the model runs on TF 2.x without modifying the repo.
-
-Architecture (from repo):
-  - VGG16-style feature extractor with CombinedConv2D (regular + SRM + Bayar)
-  - L2-normalised feature maps
-  - outlierTrans (1×1 Conv, 128→64, unit_norm)
-  - BatchNorm (no affine)
-  - NestedWindowAvg multi-scale deviation ([7,15,31] windows)
-  - GlobalStd normalisation
-  - ConvLSTM2D (64→8, 7×7 kernel)
-  - pred Conv (8→1, sigmoid)
-
-CT adaptation:
-  - 1-ch CT slices repeated to 3 channels
-  - Fine-tuned from pretrained ManTraNet_Ptrain4.h5
-  - Volume score = max(pred_map) over K slices
-
-Requirements: pip install tensorflow h5py scikit-image
-
-Usage
------
-    python baselines/train_mantranet.py \
-        --train_mods pix2pix \
-        --epochs 50 --batch_size 8 --lr 1e-4
-"""
 from __future__ import annotations
 
 import argparse
@@ -49,14 +14,10 @@ from pathlib import Path
 import numpy as np
 from sklearn.metrics import roc_auc_score, accuracy_score, f1_score, average_precision_score
 
-# =============================================================================
 #  GPU selection — MUST happen before any TensorFlow import.
 #  TF enumerates GPUs at import time; setting CUDA_VISIBLE_DEVICES afterwards
-#  has no effect.
-# =============================================================================
 
 def _select_gpu_early():
-    """Parse --gpu_id from sys.argv and set CUDA_VISIBLE_DEVICES before TF import."""
     existing = os.environ.get('CUDA_VISIBLE_DEVICES', None)
     if existing is not None:
         print(f"Using pre-set CUDA_VISIBLE_DEVICES={existing}")
@@ -94,21 +55,16 @@ def _select_gpu_early():
 
 _select_gpu_early()
 
-# =============================================================================
 #  Keras 2.2 → tf.keras compatibility shim
 #  Allows importing modelCore.py (written for standalone Keras 2.2)
 #  under TF 2.x without modifying the repository code.
-# =============================================================================
 
 def _install_keras_shim():
-    """Inject a fake 'keras' package into sys.modules that delegates to tf.keras."""
     import tensorflow as tf
 
-    # --- Create fake 'keras' namespace ----------------------------------------
     keras = types.ModuleType('keras')
     keras.__path__ = []
 
-    # Top-level submodules
     keras.layers = tf.keras.layers
     keras.models = tf.keras.models
     keras.constraints = tf.keras.constraints
@@ -120,7 +76,6 @@ def _install_keras_shim():
     _conv_mod = types.ModuleType('keras.layers.convolutional')
 
     class _ConvCompat(tf.keras.layers.Conv2D):
-        """Shim: accepts ``rank`` kwarg like old Keras ``_Conv`` base class."""
         def __init__(self, rank=2, **kwargs):
             self._rank_compat = rank
             super().__init__(**kwargs)
@@ -145,7 +100,6 @@ def _install_keras_shim():
     _engine.InputSpec = tf.keras.layers.InputSpec
     keras.engine = _engine
 
-    # --- Register in sys.modules so "from keras.X import Y" works -------------
     sys.modules['keras'] = keras
     sys.modules['keras.layers'] = keras.layers
     sys.modules['keras.layers.convolutional'] = _conv_mod
@@ -163,7 +117,6 @@ _install_keras_shim()
 
 import tensorflow as tf
 
-# ── Path setup ────────────────────────────────────────────────────────────────
 WORK_DIR      = Path(__file__).resolve().parent.parent
 MANTRANET_DIR = WORK_DIR / 'baselines' / 'git_repo' / 'ManTraNet'
 sys.path.insert(0, str(WORK_DIR))
@@ -177,11 +130,9 @@ from hexmil.utils.tiff_utils import (
     get_percentile_tiff_scan, apply_percentile,
 )
 
-# ── Import ManTraNet model from official repo ─────────────────────────────────
 from src.modelCore import create_model, load_pretrain_model_by_index
 import src.modelCore as _mc
 
-# ── Monkeypatch CombinedConv2D for TF 2.x compatibility ──────────────────────
 # In TF2/Keras, `Layer.kernel` is a read-only property — assigning to it in
 # build() raises AttributeError.  We patch build() and call() to store the
 # concatenated kernel under `_combined_kernel` instead.
@@ -251,7 +202,6 @@ def _bayar_constraint_call(self, w):
 
 _mc.BayarConstraint.__call__ = _bayar_constraint_call
 
-# ── Monkeypatch Input: fix dynamic spatial shape for ConvLSTM2D ───────────────
 # TF2 ConvLSTM2D requires static H/W dims. ManTraNet builds with (None,None,3).
 # We pin to (224,224,3) — the target_size used for all CT slices in this script.
 _orig_mc_Input = _mc.Input
@@ -264,21 +214,15 @@ _mc.Input = _fixed_Input
 ALL_FAKES = ['pix2pix', 'cycle', 'diffusion']
 PRETRAINED_DIR = str(MANTRANET_DIR / 'pretrained_weights')
 
-# =============================================================================
-#  Device selection
-# =============================================================================
 
 def select_gpu(gpu_id=None):
     # GPU selection is handled by _select_gpu_early() before TF import.
     # This function is kept as a no-op so the call in main() is harmless.
     pass
 
-# =============================================================================
 #  Data loading — M3DSynth CT slices as numpy
-# =============================================================================
 
 def load_slices_numpy(data_dir, tab, target_size=224):
-    """Load all slices into memory as numpy arrays."""
     from skimage.transform import resize as sk_resize
     images, masks, labels, mods, img_ids = [], [], [], [], []
     for _, row in tab.iterrows():
@@ -315,9 +259,7 @@ def load_slices_numpy(data_dir, tab, target_size=224):
     return (np.array(images), np.array(masks), np.array(labels),
             mods, img_ids)
 
-# =============================================================================
 #  Evaluation — same format as other baselines
-# =============================================================================
 
 def _compute_metrics(labels, scores, mods_list) -> dict:
     y = np.array(labels)
@@ -342,7 +284,6 @@ def _compute_metrics(labels, scores, mods_list) -> dict:
 
 
 def evaluate_localization_np(pred_maps, gt_masks, labels, mods_list) -> dict:
-    """Pointing Game, EoM, pixel-AUC, IoU — fake slices only."""
     _T = (0.3, 0.5, 0.7)
     pg_all, eom_all, pauc_all = [], [], []
     iou_all = {t: [] for t in _T}
@@ -393,12 +334,8 @@ def evaluate_localization_np(pred_maps, gt_masks, labels, mods_list) -> dict:
         } for mod, v in per_mod.items() if v['pg']},
     }
 
-# =============================================================================
-#  Keras training utilities
-# =============================================================================
 
 def binary_focal_loss(gamma=2.0):
-    """Focal loss for pixel-level binary prediction (sigmoid output)."""
     def loss_fn(y_true, y_pred):
         y_pred = tf.clip_by_value(y_pred, 1e-7, 1.0 - 1e-7)
         bce = -(y_true * tf.math.log(y_pred) + (1 - y_true) * tf.math.log(1 - y_pred))
@@ -407,9 +344,6 @@ def binary_focal_loss(gamma=2.0):
         return tf.reduce_mean(focal_weight * bce)
     return loss_fn
 
-# =============================================================================
-#  Args
-# =============================================================================
 
 def get_args():
     p = argparse.ArgumentParser(description='ManTraNet (Wu et al., CVPR 2019) — Keras, 1-ch CT')
@@ -430,9 +364,6 @@ def get_args():
     p.add_argument('--eval_only',       action='store_true', default=False)
     return p.parse_args()
 
-# =============================================================================
-#  Main
-# =============================================================================
 
 def main():
     args = get_args()
@@ -455,7 +386,6 @@ def main():
     with open(out_dir / 'args.json', 'w') as f:
         json.dump(args_dict, f, indent=2)
 
-    # ── Data ──────────────────────────────────────────────────────────────
     tr_mods = ['real'] + train_mods
     ts_mods = ['real'] + ALL_FAKES
 
@@ -476,7 +406,6 @@ def main():
     tr_masks_4d = tr_masks[..., np.newaxis]
     vl_masks_4d = vl_masks[..., np.newaxis]
 
-    # ── Model ─────────────────────────────────────────────────────────────
     print(f"Loading ManTraNet (pretrain_index={args.pretrain_index})...")
     model = load_pretrain_model_by_index(args.pretrain_index, PRETRAINED_DIR)
     n_params = model.count_params()
@@ -484,21 +413,17 @@ def main():
     print(f"ManTraNet: {n_params:,} params total, {n_train:,} trainable")
     model.summary(print_fn=lambda x: None)  # suppress verbose summary
 
-    # Compile
     model.compile(
         optimizer=tf.keras.optimizers.Adam(learning_rate=args.lr),
         loss=binary_focal_loss(gamma=args.focal_gamma),
     )
 
-    # ── Helper: run inference ─────────────────────────────────────────────
     def run_inference(imgs):
-        """Returns (scores, pred_maps) for all images."""
         pred_maps = model.predict(imgs, batch_size=args.batch_size, verbose=0)
         pred_maps = pred_maps[:, :, :, 0]  # (N, H, W)
         scores = [float(pm.max()) for pm in pred_maps]
         return scores, list(pred_maps)
 
-    # ── Training ──────────────────────────────────────────────────────────
     if not args.eval_only:
         best_auc, patience_counter = 0.0, 0
         best_weights_path = str(out_dir / 'best_model.weights.h5')
@@ -506,7 +431,6 @@ def main():
         for epoch in range(1, args.epochs + 1):
             t0 = time.time()
 
-            # Shuffle training data
             perm = np.random.permutation(len(tr_imgs))
             hist = model.fit(
                 tr_imgs[perm], tr_masks_4d[perm],
@@ -515,7 +439,6 @@ def main():
             )
             train_loss = hist.history['loss'][0]
 
-            # Validation
             vl_scores, _ = run_inference(vl_imgs)
             val_m = _compute_metrics(vl_labels, vl_scores, vl_mods_list)
             auc = val_m.get('auc', float('nan'))
@@ -532,7 +455,6 @@ def main():
                 if patience_counter >= args.patience:
                     print(f"  Early stopping at epoch {epoch}"); break
 
-        # Restore best weights
         model.load_weights(best_weights_path)
     else:
         best_weights_path = str(out_dir / 'best_model.weights.h5')
@@ -542,7 +464,6 @@ def main():
         else:
             print("WARNING: No saved weights found, using pretrained only")
 
-    # ── Test ──────────────────────────────────────────────────────────────
     print("\n=== Slice-Level Test ===")
     ts_scores, ts_pmaps = run_inference(ts_imgs)
     sm = _compute_metrics(ts_labels, ts_scores, ts_mods_list)

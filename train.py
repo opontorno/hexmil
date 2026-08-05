@@ -1,57 +1,34 @@
 #!/usr/bin/env python
-"""
-train.py — Full pipeline: SliceMIL (Stage 1) → HexMIL (Stage 2).
-
-Runs both training stages sequentially with a single command.
-Stage-specific args use the s_* / v_* prefix; shared args are forwarded to both.
-
-For single-stage training use the individual scripts:
-  python train_slicemil.py ...
-  python train_hexmil.py ...
-"""
 
 import argparse
 import subprocess
 import sys
 from pathlib import Path
 
-from config import WORK_DIR
+from config import WORK_DIR, require_data_dir
 ALL_FAKES = ['pix2pix', 'cycle', 'diffusion', 'ctgan']
-HERE      = Path(__file__).parent        # experiments/ABMIL/
+HERE      = Path(__file__).parent
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Parser
-# ─────────────────────────────────────────────────────────────────────────────
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        description="ABMIL full pipeline: slice-cls then volume-cls.",
+        description="Full pipeline: SliceMIL (Stage 1) then HexMIL (Stage 2).",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
-    # ── Shared ────────────────────────────────────────────────────────────────
     sh = p.add_argument_group("Shared  (forwarded to both stages)")
     sh.add_argument("--backbone",    default="resnet50",
-                    choices=["resnet50", "resnet34",
-                             "efficientnet_b0", "efficientnet_b4", "densenet121",
-                             "vit_base", "clip"])
-    sh.add_argument("--mods",        nargs="+", default=None,
-                    help="Fake modalities to train on (default: all three)")
+                    choices=["resnet50", "resnet34", "efficientnet_b0", "efficientnet_b4", "densenet121"])
+    sh.add_argument("--mods",        nargs="+", default=None, help="Fake modalities to train on (default: all three)")
     sh.add_argument("--patch_size",  type=int,  default=64)
-    sh.add_argument("--stride",      type=int,  default=None,
-                    help="Sliding-window stride (default: patch_size // 2)")
+    sh.add_argument("--stride",      type=int,  default=None, help="Sliding-window stride (default: patch_size // 2)")
     sh.add_argument("--proj_dim",    type=int,  default=512)
     sh.add_argument("--seed",        type=int,  default=42)
     sh.add_argument("--num_workers", type=int,  default=4)
-    sh.add_argument("--wandb_mode",  default="online",
-                    choices=["online", "offline", "disabled"])
-    sh.add_argument("--debug",       action="store_true",
-                    help="Disable WandB logging")
-    sh.add_argument("--gpu_id",      type=int,  default=None,
-                    help="Force a specific GPU (default: auto-select)")
+    sh.add_argument("--wandb_mode",  default="disabled", choices=["online", "offline", "disabled"])
+    sh.add_argument("--debug",       action="store_true", help="Disable WandB logging")
+    sh.add_argument("--gpu_id",      type=int,  default=None, help="Force a specific GPU (default: auto-select)")
 
-    # ── Slice stage ───────────────────────────────────────────────────────────
     sl = p.add_argument_group("Slice stage  [s_ prefix → train_slicemil.py]")
     sl.add_argument("--s_attn_dim",       type=int,   default=128)
     sl.add_argument("--s_dropout",        type=float, default=0.25)
@@ -66,18 +43,15 @@ def build_parser() -> argparse.ArgumentParser:
     sl.add_argument("--s_vis_every",      type=int,   default=5)
     sl.add_argument("--s_run_name",       default=None,
                     help="Custom run-name for the slice stage")
-    # ABMIL-specific slice args
     sl.add_argument("--aux_attn_loss",       action="store_true", default=False,
                     help="Guide ABMIL α with GT mask coverage (KL loss)")
     sl.add_argument("--aux_weight",          type=float, default=0.5,
                     help="Weight λ of the auxiliary KL attention loss")
-    # Slice neighbourhood selection
     sl.add_argument("--neighborhood_radius", type=int, default=5,
                     help="Half-width of the window around coord_z (default: 5)")
     sl.add_argument("--neighborhood_slices", type=int, default=4,
                     help="Extra slices sampled beyond coord_z (default: 4)")
 
-    # ── Volume stage ──────────────────────────────────────────────────────────
     vl = p.add_argument_group("Volume stage [v_ prefix → train_hexmil.py]")
     vl.add_argument("--v_K",             type=int,   default=32,
                     help="Slice-window size K")
@@ -96,18 +70,13 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Helpers
-# ─────────────────────────────────────────────────────────────────────────────
-
 def _infer_slice_ckpt_dir(args) -> Path:
-    """Reconstruct the out_dir that train_slicemil.py will create."""
     fake_mods   = [m for m in (args.mods or ALL_FAKES) if m != "real"]
     stride_eff  = args.stride or (args.patch_size // 2)
     mods_tag    = "all" if set(fake_mods) == set(ALL_FAKES) else "+".join(sorted(fake_mods))
     attn_tag    = "_attn" if args.aux_attn_loss else ""
     base_dir    = (Path(WORK_DIR) / "runs"
-                   / f"slice-cls_{args.backbone}_p{args.patch_size}_s{stride_eff}{attn_tag}")
+                   / f"slicemil_{args.backbone}_p{args.patch_size}_s{stride_eff}{attn_tag}")
     if args.s_run_name is not None:
         run_tag = args.s_run_name
     else:
@@ -117,7 +86,6 @@ def _infer_slice_ckpt_dir(args) -> Path:
 
 def _build_slice_argv(args) -> list:
     a = []
-    # shared
     a += ["--backbone",    args.backbone]
     a += ["--patch_size",  str(args.patch_size)]
     a += ["--proj_dim",    str(args.proj_dim)]
@@ -133,7 +101,6 @@ def _build_slice_argv(args) -> list:
         a += ["--debug"]
     if args.gpu_id is not None:
         a += ["--gpu_id", str(args.gpu_id)]
-    # slice-specific
     a += ["--attn_dim",      str(args.s_attn_dim)]
     a += ["--dropout",       str(args.s_dropout)]
     a += ["--epochs",        str(args.s_epochs)]
@@ -158,7 +125,6 @@ def _build_slice_argv(args) -> list:
 def _build_volume_argv(args, slice_ckpt_dir: Path) -> list:
     a = []
     a += ["--slice_ckpt_dir", str(slice_ckpt_dir)]
-    # shared
     a += ["--seed",        str(args.seed)]
     a += ["--num_workers", str(args.num_workers)]
     a += ["--wandb_mode",  args.wandb_mode]
@@ -169,7 +135,6 @@ def _build_volume_argv(args, slice_ckpt_dir: Path) -> list:
         a += ["--debug"]
     if args.gpu_id is not None:
         a += ["--gpu_id", str(args.gpu_id)]
-    # volume-specific
     a += ["--K",             str(args.v_K)]
     a += ["--attn_dim",      str(args.v_attn_dim)]
     a += ["--dropout",       str(args.v_dropout)]
@@ -197,17 +162,12 @@ def _run(script: Path, extra_argv: list):
         sys.exit(result.returncode)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Main
-# ─────────────────────────────────────────────────────────────────────────────
-
 def main():
     args = build_parser().parse_args()
+    require_data_dir()
 
-    # ── Stage 1: slice ────────────────────────────────────────────────────────
     _run(HERE / "train_slicemil.py", _build_slice_argv(args))
 
-    # ── Locate the checkpoint created by Stage 1 ─────────────────────────────
     slice_ckpt_dir = _infer_slice_ckpt_dir(args)
     ckpt_file      = slice_ckpt_dir / "best_model.pt"
     if not ckpt_file.exists():
@@ -216,7 +176,6 @@ def main():
         sys.exit(1)
     print(f"\n[train.py] Slice checkpoint confirmed:\n  {slice_ckpt_dir}\n")
 
-    # ── Stage 2: volume ───────────────────────────────────────────────────────
     _run(HERE / "train_hexmil.py", _build_volume_argv(args, slice_ckpt_dir))
 
 

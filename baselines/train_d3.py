@@ -1,14 +1,4 @@
 #!/usr/bin/env python3
-"""
-train_d3.py
-===========
-D3 baseline — Corvi et al., CVPR 2023.
-Uses ResNet-50 with LPF (Low-Pass Filter / BlurPool) anti-aliasing strides
-from the official repo: baselines/git_repo/D3/networks/resnet_lpf.py
-
-CT adaptation: 1-ch grayscale slices are repeated to 3-ch before forward.
-Volume score:  max(sigmoid) over K slices.
-"""
 from __future__ import annotations
 
 import argparse
@@ -27,7 +17,6 @@ from torch.utils.data import DataLoader, Dataset, WeightedRandomSampler
 from sklearn.metrics import roc_auc_score, accuracy_score, f1_score, average_precision_score
 from tqdm import tqdm
 
-# ── Path setup ────────────────────────────────────────────────────────────────
 WORK_DIR = Path(__file__).resolve().parent.parent
 D3_DIR   = WORK_DIR / 'baselines' / 'git_repo' / 'D3'
 sys.path.insert(0, str(WORK_DIR))
@@ -48,9 +37,6 @@ ALL_FAKES = ['pix2pix', 'cycle', 'diffusion']
 _IMG_MEAN = 0.449   # (0.485 + 0.456 + 0.406) / 3
 _IMG_STD  = 0.226   # (0.229 + 0.224 + 0.225) / 3
 
-# =============================================================================
-#  Device
-# =============================================================================
 
 def select_device(gpu_id: int | None = None) -> torch.device:
     if not torch.cuda.is_available():
@@ -69,9 +55,6 @@ def select_device(gpu_id: int | None = None) -> torch.device:
     except Exception:
         return torch.device('cuda')
 
-# =============================================================================
-#  Datasets
-# =============================================================================
 
 class SliceDataset(Dataset):
     def __init__(self, data_dir: str, tab, target_size: int = 224, augment: bool = False):
@@ -155,9 +138,6 @@ class VolumeDataset(Dataset):
             imgs_t = F.interpolate(imgs_t, size=self.target_size, mode='bilinear', align_corners=False)
         return dict(images=imgs_t, label=0 if mod == 'real' else 1, mod=mod, img_id=img_id)
 
-# =============================================================================
-#  Evaluation
-# =============================================================================
 
 def _compute_metrics(labels, scores, mods) -> dict:
     y = np.array(labels)
@@ -212,9 +192,6 @@ def evaluate_volumes(model, loader, device) -> dict:
         mods.append(b['mod'][0])
     return _compute_metrics(labels, scores, mods)
 
-# =============================================================================
-#  Args
-# =============================================================================
 
 def get_args():
     p = argparse.ArgumentParser(description='D3 LPF-ResNet50 baseline — 1-ch CT adaptation')
@@ -238,9 +215,6 @@ def get_args():
     p.add_argument('--eval_only',    action='store_true', default=False)
     return p.parse_args()
 
-# =============================================================================
-#  Main
-# =============================================================================
 
 def main():
     args = get_args()
@@ -259,7 +233,6 @@ def main():
     with open(out_dir / 'args.json', 'w') as f:
         json.dump(args_dict, f, indent=2)
 
-    # ── Data ──────────────────────────────────────────────────────────────
     fake_mods = [m for m in train_mods if m != 'real']
     tr_mods   = ['real'] + fake_mods
     ts_mods   = ['real'] + ALL_FAKES
@@ -281,7 +254,6 @@ def main():
     dl_valid = DataLoader(ds_valid, args.batch_size, shuffle=False, **kw)
     dl_test  = DataLoader(ds_test,  args.batch_size, shuffle=False, **kw)
 
-    # ── Model ─────────────────────────────────────────────────────────────
     # D3 ResNet-50 with LPF anti-aliasing; replace fc for binary classification
     model = d3_resnet50(pretrained=False, filter_size=args.filter_size, pool_only=True,
                         num_classes=1)
@@ -337,7 +309,6 @@ def main():
                 if patience_counter >= args.patience:
                     print(f"  Early stopping at epoch {epoch}"); break
 
-    # ── Test ──────────────────────────────────────────────────────────────
     ckpt = torch.load(out_dir / 'best_model.pt', map_location=device, weights_only=False)
     model.load_state_dict(ckpt['model_state_dict'])
 

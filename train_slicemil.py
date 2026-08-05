@@ -1,21 +1,4 @@
 #!/usr/bin/env python3
-"""
-train_slicemil.py
-=================
-Stage 1 — SliceMIL training: CT slice binary classification via ABMIL.
-
-Each slice is tiled into overlapping patches, encoded by a CNN backbone, and
-aggregated with Gated Attention MIL. The full model is trained end-to-end.
-
-Dataset splits (given --mods M):
-  train    : real + M         (augmented)
-  in_valid : real + M         (in-domain loss monitor)
-  valid    : real + all fakes (checkpoint selection)
-  test     : real + OOD fakes (held-out evaluation)
-
-Usage:
-    python train_slicemil.py --backbone resnet50 --mods pix2pix cycle diffusion
-"""
 
 from __future__ import annotations
 
@@ -41,22 +24,16 @@ from sklearn.metrics import (
 from scipy.special import expit as sigmoid_np
 import GPUtil
 
-# ── project imports ──────────────────────────────────────────────────────────
 
 from hexmil.data.patch_dataset import load_split_table
 from hexmil.data.slice_dataset import SliceDataset, build_patch_grid, reconstruct_heatmap
-from hexmil.models.abmil_slice_classifier import (
-    build_abmil_classifier_scratch, ABMILSliceClassifier,
+from hexmil.models.slicemil import (
+    build_slicemil, SliceMIL,
 )
 
-# ── paths / constants ────────────────────────────────────────────────────────
-from config import DATA_DIR, WORK_DIR
+from config import DATA_DIR, WORK_DIR, require_data_dir
 ALL_FAKES = ['pix2pix', 'cycle', 'diffusion', 'ctgan']
 
-
-# =============================================================================
-#  GPU selection
-# =============================================================================
 
 def select_best_gpu() -> int | None:
     if not torch.cuda.is_available():
@@ -72,21 +49,13 @@ def select_best_gpu() -> int | None:
     return best.id
 
 
-# =============================================================================
-#  Args
-# =============================================================================
-
 def get_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description='Stage 1: slice-level MIL classification')
 
-    # ── Backbone ──────────────────────────────────────────────────────────
     parser.add_argument('--backbone', type=str, default='resnet50',
                         choices=['resnet50', 'resnet34', 'efficientnet_b0',
-                                 'efficientnet_b4', 'densenet121',
-                                 'vit_base', 'clip'],
-                        help='Patch encoder backbone. CNN options use ImageNet pretrained '
-                             'weights; vit_base uses pretrained ViT-B/16; '
-                             'clip uses OpenAI CLIP ViT-B/16.')
+                                 'efficientnet_b4', 'densenet121'],
+                        help='Patch encoder backbone (ImageNet-pretrained).')
     parser.add_argument('--mods', nargs='+', default=None,
                         help='Fake modalities for train/in_valid (default: None = all fakes). '
                              'OOD fakes (not in mods) become the test set.',
@@ -94,12 +63,10 @@ def get_args() -> argparse.Namespace:
     parser.add_argument('--pretrained', action='store_true', default=True,
                         help='Initialise backbone from ImageNet weights')
 
-    # ── MIL / model ──────────────────────────────────────────────────────────
     parser.add_argument('--patch_size', type=int, default=64, choices=[32, 64, 128],
                         help='Patch size for the sliding-window tiling')
     parser.add_argument('--stride',     type=int, default=None,
                         help='Sliding-window stride (default: patch_size // 2)')
-    # ── Slice neighbourhood selection ─────────────────────────────────────────
     parser.add_argument('--neighborhood_radius', type=int, default=5,
                         help='Half-width of the window around coord_z from which '
                              'extra slices are sampled (default: 5 → ±5 slices)')
@@ -113,13 +80,11 @@ def get_args() -> argparse.Namespace:
     parser.add_argument('--dropout',    type=float, default=0.25,
                         help='Dropout probability in projector + head + ABMIL')
 
-    # ── Auxiliary attention loss ──────────────────────────────────────────────
     parser.add_argument('--aux_attn_loss', action='store_true',
                         help='Guide ABMIL weights with per-patch GT mask coverage')
     parser.add_argument('--aux_weight',    type=float, default=0.3,
                         help='Weight of the auxiliary attention loss')
 
-    # ── Training ─────────────────────────────────────────────────────────────
     parser.add_argument('--epochs',          type=int,   default=50)
     parser.add_argument('--batch_size',      type=int,   default=16,
                         help='Number of slices per batch')
@@ -128,46 +93,29 @@ def get_args() -> argparse.Namespace:
     parser.add_argument('--balance_classes', action='store_true', default=True,
                         help='Weighted sampler to balance real/fake slices')
 
-    # ── Scheduler / early stopping ────────────────────────────────────────────
     parser.add_argument('--scheduler',      action='store_true',
                         help='ReduceLROnPlateau on val loss')
     parser.add_argument('--warmup_epochs',  type=int, default=0)
     parser.add_argument('--patience',       type=int, default=10)
 
-    # ── System ───────────────────────────────────────────────────────────────
     parser.add_argument('--num_workers', type=int,  default=4)
     parser.add_argument('--amp',         action='store_true', default=True,
                         help='Mixed precision for projector/aggregator/head')
     parser.add_argument('--seed',        type=int,  default=42)
-    parser.add_argument('--wandb_mode',  default='online',
+    parser.add_argument('--wandb_mode',  default='disabled',
                         choices=['online', 'offline', 'disabled'],
-                        help='WandB logging mode')
+                        help='WandB logging mode (pass "online" to enable)')
     parser.add_argument('--debug',       action='store_true',
                         help='Debug mode: sets wandb_mode to disabled')
     parser.add_argument('--run_name',    type=str,  default=None)
     parser.add_argument('--gpu_id',      type=int,  default=None)
 
-    # ── Visualisation ─────────────────────────────────────────────────────────
     parser.add_argument('--vis_every',     type=int, default=5)
 
     return parser.parse_args()
 
 
-# =============================================================================
-#  Data
-# =============================================================================
-
 def build_dataloaders(args):
-    """
-    Build 4 dataloaders based on args.mods:
-
-      dl_train    : real + fake_mods  (train split, augmented)
-      dl_in_valid : real + fake_mods  (valid split, in-domain loss monitor)
-      dl_valid    : real + ALL_FAKES  (valid split, checkpoint selection)
-      dl_test     : real + OOD fakes  (test split; if no OOD -> all fakes)
-
-    Returns: dl_train, dl_in_valid, dl_valid, dl_test, actual_stride
-    """
     fake_mods      = [m for m in args.mods if m != 'real'] if args.mods else ALL_FAKES
     ood_fakes      = [m for m in ALL_FAKES if m not in set(fake_mods)]
     test_fake_mods = ood_fakes if ood_fakes else ALL_FAKES
@@ -245,17 +193,7 @@ def _count_patches(ds: SliceDataset) -> str:
         return '?'
 
 
-# =============================================================================
-#  Loss
-# =============================================================================
-
 class SliceLoss(nn.Module):
-    """
-    BCE on the bag-level logit + optional KL-divergence attention supervision.
-
-    Dataset labels are multiclass (real=0, pix2pix=1, cycle=2, diffusion=3).
-    Binary labels are derived internally as (label > 0).
-    """
 
     def __init__(self, aux_attn: bool = False, aux_weight: float = 0.3):
         super().__init__()
@@ -354,10 +292,6 @@ def _smooth_attn(a: np.ndarray) -> np.ndarray:
     return (a - lo) / (hi - lo + 1e-8)
 
 
-# =============================================================================
-#  Evaluation helpers
-# =============================================================================
-
 def _balanced_mod_metrics(
     bin_labels: np.ndarray,
     probs:      np.ndarray,
@@ -366,9 +300,6 @@ def _balanced_mod_metrics(
     mod:        str,
     seed:       int = 42,
 ) -> dict[str, float]:
-    """
-    AUC/ACC/F1/AP for `mod` vs real using equal balanced sampling (fixed seed).
-    """
     real_idx = np.where(mods_arr == 'real')[0]
     fake_idx = np.where(mods_arr == mod)[0]
     if len(fake_idx) == 0 or len(real_idx) == 0:
@@ -401,7 +332,7 @@ def _balanced_mod_metrics(
 
 @torch.no_grad()
 def evaluate(
-    model:      ABMILSliceClassifier,
+    model:      SliceMIL,
     dataloader: DataLoader,
     criterion:  SliceLoss,
     device:     torch.device,
@@ -410,11 +341,6 @@ def evaluate(
     seed:       int = 42,
     verbose:    bool = False,
 ) -> dict:
-    """
-    Run inference on dataloader and return:
-      loss, auc, accuracy, ap, f1  (global binary)
-      {mod}_auc, {mod}_acc, {mod}_f1, {mod}_ap  (per-mod, balanced sampling)
-    """
     model.eval()
 
     all_logits: list = []
@@ -466,12 +392,8 @@ def evaluate(
     return metrics
 
 
-# =============================================================================
-#  Training
-# =============================================================================
-
 def train_one_epoch(
-    model:     ABMILSliceClassifier,
+    model:     SliceMIL,
     dataloader: DataLoader,
     criterion:  SliceLoss,
     optimiser:  torch.optim.Optimizer,
@@ -528,21 +450,10 @@ def train_one_epoch(
     return {k: v / max(n_batches, 1) for k, v in running.items()}
 
 
-# =============================================================================
-#  Periodic visualisation
-# =============================================================================
-
-
 def _render_vis_pngs(
     cands:   dict,
     vis_dir: Path,
 ) -> None:
-    """
-    Render one PNG per modality in vis_dir/{mod}.png.
-    Fake mods : 2 rows x 3 cols  (row 0 = removal, row 1 = injection)
-    Real mod  : 1 row  x 3 cols
-    Columns: CT slice + GT bbox | Attention heatmap | Overlay
-    """
     try:
         import matplotlib
         matplotlib.use('Agg')
@@ -622,18 +533,13 @@ def _render_vis_pngs(
 
 @torch.no_grad()
 def save_epoch_vis(
-    model:      ABMILSliceClassifier,
+    model:      SliceMIL,
     dataloader: DataLoader,
     device:     torch.device,
     vis_dir:    Path,
     patch_size: int,
     stride:     int,
 ) -> None:
-    """
-    Save one PNG per modality detected in the dataloader.
-    Each PNG shows one removal and one injection example (real: one example only).
-    Files: vis_dir/{mod}.png
-    """
     vis_dir.mkdir(parents=True, exist_ok=True)
     model.eval()
     model.encoder.eval()
@@ -678,9 +584,6 @@ def save_epoch_vis(
     model.train()
 
 
-
-
-
 def _assemble_slice_preview(
     patches:    torch.Tensor,   # (N, 1, P, P) CPU
     grid_hw:    tuple[int, int],
@@ -688,7 +591,6 @@ def _assemble_slice_preview(
     patch_size: int,
     stride:     int,
 ) -> np.ndarray:
-    """Reconstruct a low-res slice preview by averaging overlapping patches."""
     H, W    = slice_hw
     half    = patch_size // 2
     accum   = np.zeros((H, W), dtype=np.float32)
@@ -717,10 +619,6 @@ def _assemble_slice_preview(
     return accum / np.maximum(count, 1e-6)
 
 
-# =============================================================================
-#  Test evaluation
-# =============================================================================
-
 @torch.no_grad()
 def run_test_evaluation_slice(
     model,
@@ -734,12 +632,6 @@ def run_test_evaluation_slice(
     in_domain_fakes: set | None = None,
     seed:            int = 42,
 ) -> dict:
-    """
-    Full test evaluation. Saves to eval_dir/:
-        metrics.json, per_sample_metrics.csv, {mod}.png (one per modality)
-
-    Per-modality metrics use balanced equal sampling (fixed seed).
-    """
     eval_dir.mkdir(parents=True, exist_ok=True)
     model.eval()
 
@@ -799,7 +691,6 @@ def run_test_evaluation_slice(
                     'img_id':  img_id,
                 }
 
-    # ── Aggregate classification metrics ──────────────────────────────────────
     all_logits = torch.cat(all_logits).numpy()
     all_labels = torch.cat(all_labels).numpy()   # multiclass
     bin_labels = (all_labels > 0).astype(int)
@@ -826,7 +717,6 @@ def run_test_evaluation_slice(
         'classification': cls_metrics,
     }
 
-    # ── Save outputs ──────────────────────────────────────────────────────────
     with open(eval_dir / 'metrics.json', 'w') as f:
         json.dump(results, f, indent=2, default=str)
     print(f"  Metrics JSON      -> {eval_dir / 'metrics.json'}")
@@ -839,7 +729,6 @@ def run_test_evaluation_slice(
             writer.writerows(per_sample_records)
         print(f"  Per-sample CSV    -> {csv_path}")
 
-    # ── Visualization PNGs (one per modality) ────────────────────────────────
     _render_vis_pngs(cands, eval_dir)
     print(f"  Vis PNGs          -> {eval_dir}/<mod>.png")
 
@@ -847,15 +736,9 @@ def run_test_evaluation_slice(
     return results
 
 
-# =============================================================================
 #  Champion / Challenger promotion
-# =============================================================================
 
 def promote_if_better(temp_dir: Path, canonical_dir: Path) -> None:
-    """
-    Compare challenger (temp_dir) vs canonical using test accuracy from metrics.json.
-    Challenger wins if acc >= champion acc.
-    """
     def _test_acc(run_dir: Path) -> float:
         jf = run_dir / 'evaluation' / 'metrics.json'
         if not jf.exists():
@@ -890,29 +773,23 @@ def promote_if_better(temp_dir: Path, canonical_dir: Path) -> None:
         print(f'  Canonical unchanged: {canonical_dir}')
 
 
-# =============================================================================
-#  Main
-# =============================================================================
-
 def main(args: argparse.Namespace) -> None:
+    require_data_dir()
 
     if args.debug:
         args.wandb_mode = 'disabled'
 
-    # ── Seed ─────────────────────────────────────────────────────────────────
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(args.seed)
 
-    # ── Device ───────────────────────────────────────────────────────────────
     if args.gpu_id is not None:
         device = torch.device(f'cuda:{args.gpu_id}')
     else:
         gid    = select_best_gpu()
         device = torch.device(f'cuda:{gid}') if gid is not None else torch.device('cpu')
 
-    # ── Modality sets ────────────────────────────────────────────────────────
     fake_mods      = [m for m in args.mods if m != 'real'] if args.mods else ALL_FAKES
     ood_fakes      = [m for m in ALL_FAKES if m not in set(fake_mods)]
     test_fake_mods = ood_fakes if ood_fakes else ALL_FAKES
@@ -931,16 +808,15 @@ def main(args: argparse.Namespace) -> None:
     print(f"  OOD fakes       : {ood_fakes}")
     print(f"  Test fakes      : {test_fake_mods}")
 
-    # ── Run directory ────────────────────────────────────────────────────────
     stride_eff   = args.stride or (args.patch_size // 2)
     mods_tag     = 'all' if set(fake_mods) == set(ALL_FAKES) else '+'.join(sorted(fake_mods))
     attn_tag     = '_attn' if args.aux_attn_loss else ''
     base_dir     = (Path(WORK_DIR) / 'runs'
-                    / f"slice-cls_{args.backbone}_p{args.patch_size}_s{stride_eff}{attn_tag}")
+                    / f"slicemil_{args.backbone}_p{args.patch_size}_s{stride_eff}{attn_tag}")
     if args.run_name is None:
         loss_tag   = 'bce' if not args.aux_attn_loss else 'bce+attn'
         run_tag    = f"trained_on_{mods_tag}_{loss_tag}_bs{args.batch_size}_lr{args.lr}{attn_tag}"
-        wandb_name = f"slice-cls_{args.backbone}_p{args.patch_size}_s{stride_eff}_{loss_tag}_bs{args.batch_size}_lr{args.lr}{attn_tag}"
+        wandb_name = f"slicemil_{args.backbone}_p{args.patch_size}_s{stride_eff}_{loss_tag}_bs{args.batch_size}_lr{args.lr}{attn_tag}"
     else:
         run_tag    = args.run_name
         wandb_name = args.run_name
@@ -953,20 +829,17 @@ def main(args: argparse.Namespace) -> None:
     with open(out_dir / 'args.json', 'w') as f:
         json.dump(vars(args), f, indent=2)
 
-    # ── WandB ────────────────────────────────────────────────────────────────
     if args.wandb_mode != 'disabled':
         import wandb
         wandb.init(project='MedForensics', group=wandb_group, name=wandb_name,
                    config=vars(args), mode=args.wandb_mode)
 
-    # ── Data ─────────────────────────────────────────────────────────────────
     print("Loading data...")
     dl_train, dl_in_valid, dl_valid, dl_test, actual_stride = build_dataloaders(args)
     print()
 
-    # ── Model ────────────────────────────────────────────────────────────────
     print("Building ABMIL model...")
-    model = build_abmil_classifier_scratch(
+    model = build_slicemil(
         backbone=args.backbone, pretrained=args.pretrained,
         proj_dim=args.proj_dim, attn_dim=args.attn_dim, dropout=args.dropout,
         patch_size=args.patch_size,
@@ -975,7 +848,6 @@ def main(args: argparse.Namespace) -> None:
     total_p = sum(p.numel() for p in model.parameters())
     print(f"  Trainable: {total_p:,} params  (full model — end-to-end)\n")
 
-    # ── Optimiser & scheduler ─────────────────────────────────────────────────
     optimiser = torch.optim.AdamW(
         [p for p in model.parameters() if p.requires_grad],
         lr=args.lr, weight_decay=args.weight_decay,
@@ -986,11 +858,9 @@ def main(args: argparse.Namespace) -> None:
         ) if args.scheduler else None
     )
 
-    # ── Loss / AMP ───────────────────────────────────────────────────────────
     criterion = SliceLoss(aux_attn=args.aux_attn_loss, aux_weight=args.aux_weight)
     scaler    = torch.amp.GradScaler('cuda', enabled=args.amp)
 
-    # ── Training loop ────────────────────────────────────────────────────────
     best_val_loss    = float('inf')
     patience_counter = 0
     history          = []
@@ -1009,7 +879,6 @@ def main(args: argparse.Namespace) -> None:
     for epoch in epoch_bar:
         t0 = time.time()
 
-        # Warmup LR
         if epoch <= args.warmup_epochs:
             wlr = args.lr * (epoch / args.warmup_epochs)
             for pg in optimiser.param_groups:
@@ -1037,7 +906,6 @@ def main(args: argparse.Namespace) -> None:
         elapsed    = time.time() - t0
         current_lr = optimiser.param_groups[0]['lr']
 
-        # ── Epoch-bar postfix (visible in terminal when not wandb online) ────
         if verbose:
             best_auc = max(
                 (val_metrics.get(f'{m}_auc', 0.0) for m in ALL_FAKES),
@@ -1050,7 +918,6 @@ def main(args: argparse.Namespace) -> None:
                 'lr':  f"{current_lr:.1e}",
             })
 
-        # ── Print: 3 losses ─────────────────────────────────────────────────
         log_str = (
             f"\nEpoch {epoch:03d}/{args.epochs} | "
             f"Train {train_losses['total']:.4f}"
@@ -1064,7 +931,6 @@ def main(args: argparse.Namespace) -> None:
         )
         print(log_str)
 
-        # ── Print: per-modality AUC/ACC/AP/F1 from valid ────────────────────
         if fake_mods:
             print("  ─── In-domain " + "─" * 54)
             for m in sorted(fake_mods):
@@ -1082,7 +948,6 @@ def main(args: argparse.Namespace) -> None:
                 f1 = val_metrics.get(f'{m}_f1',  float('nan'))
                 print(f"  {m:<12s}  AUC {a:.4f}  ACC {ac:.4f}  AP {ap:.4f}  F1 {f1:.4f}")
 
-        # ── Visualisation ─────────────────────────────────────────────────────
         if args.vis_every > 0 and epoch % args.vis_every == 0:
             vis_dir = out_dir / 'vis' / f'epoch_{epoch:03d}'
             try:
@@ -1101,7 +966,6 @@ def main(args: argparse.Namespace) -> None:
             except Exception as e:
                 print(f"  [WARN] save_epoch_vis failed at epoch {epoch}: {e}")
 
-        # ── WandB ────────────────────────────────────────────────────────────
         if args.wandb_mode != 'disabled':
             log_dict = {
                 'train/loss':    train_losses['total'],
@@ -1116,7 +980,6 @@ def main(args: argparse.Namespace) -> None:
                     log_dict[f'valid/{m}/{k}'] = val_metrics.get(f'{m}_{k}', float('nan'))
             wandb.log(log_dict)
 
-        # ── History ───────────────────────────────────────────────────────────
         history.append({
             'epoch':          epoch,
             'lr':             current_lr,
@@ -1126,7 +989,6 @@ def main(args: argparse.Namespace) -> None:
             'time_s':         elapsed,
         })
 
-        # ── Checkpoint on best valid loss (all-fakes valid set) ───────────────
         if val_metrics['loss'] < best_val_loss:
             best_val_loss    = val_metrics['loss']
             patience_counter = 0
@@ -1149,7 +1011,6 @@ def main(args: argparse.Namespace) -> None:
     with open(out_dir / 'history.json', 'w') as f:
         json.dump(history, f, indent=2, default=str)
 
-    # ── Test evaluation (best model) ─────────────────────────────────────────
     print(f"\n{'='*60}")
     print("  Test Evaluation (best model)")
     print(f"{'='*60}\n")
@@ -1172,7 +1033,6 @@ def main(args: argparse.Namespace) -> None:
     )
     cls_m = results['classification']
 
-    # ── Print test summary ────────────────────────────────────────────────────
     print(f"\n  Test fakes : {test_fake_mods}")
     print(f"  Overall    : AUC {cls_m['auc']:.4f}  ACC {cls_m['accuracy']:.4f}"
           f"  AP {cls_m['ap']:.4f}  F1 {cls_m['f1']:.4f}")

@@ -1,13 +1,3 @@
-"""
-resnet3d_classifier.py
-======================
-3D CNN baseline using torchvision R3D-18 (or MC3-18).
-Takes a K-slice CT sub-volume as (1, K, H, W) and classifies it.
-GradCAM is used for 3D localization (not attention-based).
-
-Usage:
-    from baselines.models.resnet3d_classifier import R3DClassifier, build_r3d_classifier
-"""
 from __future__ import annotations
 import torch
 import torch.nn as nn
@@ -16,14 +6,6 @@ from typing import Optional, Tuple
 
 
 class R3DClassifier(nn.Module):
-    """
-    R3D-18 (or MC3-18) adapted for single-channel CT volume binary classification.
-
-    Args:
-        arch:     'r3d_18' or 'mc3_18'
-        pretrained: use torchvision pretrained weights (ImageNet video)
-        dropout:    dropout rate in the classification head
-    """
     def __init__(self, arch: str = 'r3d_18', pretrained: bool = False, dropout: float = 0.3):
         super().__init__()
         import torchvision.models.video as vm
@@ -51,7 +33,6 @@ class R3DClassifier(nn.Module):
             nn.Linear(feat_dim, 1),
         )
 
-        # For GradCAM hook
         self._gradients: Optional[torch.Tensor] = None
         self._activations: Optional[torch.Tensor] = None
         self.layer4[-1].register_forward_hook(self._save_activation)
@@ -64,12 +45,6 @@ class R3DClassifier(nn.Module):
         self._gradients = grad_out[0].detach()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-            x: (B, 3, K, H, W) — 3-channel 3D volume (1-ch CT repeated to 3-ch)
-        Returns:
-            logit: (B, 1)
-        """
         x = self.stem(x)
         x = self.layer1(x)
         x = self.layer2(x)
@@ -80,13 +55,6 @@ class R3DClassifier(nn.Module):
         return self.classifier(x)
 
     def gradcam_3d(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Compute GradCAM attention map for a single volume.
-        Args:
-            x: (1, 1, K, H, W)
-        Returns:
-            cam: (K, H, W) float32, normalized to [0,1]
-        """
         x = x.requires_grad_(True)
         logit = self.forward(x)           # (1,1)
         self.zero_grad()

@@ -1,21 +1,4 @@
 #!/usr/bin/env python3
-"""
-train_mvssnet.py
-================
-Full MVSS-Net baseline (Chen et al., CVPR 2022) — PyTorch, 1-channel CT.
-
-Uses the complete MVSSNet architecture (Chen et al., CVPR 2022):
-  - ResNet-50 backbone adapted for 1-channel CT (conv1 weights averaged)
-  - Edge-supervision branch (Sobel filters on multi-scale features)
-  - No BayarConv/NoisePrint constraint (designed for JPEG/camera fingerprints,
-    not applicable to CT; removed as domain-inappropriate, consistent with
-    the model's own `constrain=False` flag)
-  - Multi-task loss: focal+dice on both edge branch (res1) and main head (x0)
-  - Volume score = max(sigmoid(x0)) over K slices
-
-Architecture: MVSSNet(sobel=True, constrain=False, n_input=1)
-  forward(x) → (res1, x0)  — edge map and main segmentation map
-"""
 from __future__ import annotations
 
 import argparse
@@ -35,7 +18,6 @@ from torch.utils.data import DataLoader, Dataset, WeightedRandomSampler
 from sklearn.metrics import roc_auc_score, accuracy_score, f1_score, average_precision_score
 from tqdm import tqdm
 
-# ── Path setup ────────────────────────────────────────────────────────────────
 WORK_DIR   = Path(__file__).resolve().parent.parent
 MVSS_DIR   = WORK_DIR / 'baselines' / 'git_repo' / 'MVSS-Net'
 sys.path.insert(0, str(WORK_DIR))
@@ -66,9 +48,7 @@ _RESNET50_URL = 'https://download.pytorch.org/models/resnet50-19c8e357.pth'
 _IMG_MEAN = 0.449   # (0.485 + 0.456 + 0.406) / 3
 _IMG_STD  = 0.226   # (0.229 + 0.224 + 0.225) / 3
 
-# =============================================================================
 #  Device selection — picks GPU with most free memory
-# =============================================================================
 
 def select_device(gpu_id: int | None = None) -> torch.device:
     if not torch.cuda.is_available():
@@ -87,39 +67,21 @@ def select_device(gpu_id: int | None = None) -> torch.device:
     except Exception:
         return torch.device('cuda')
 
-# =============================================================================
 #  Model — Full MVSSNet with original 3-ch backbone
-# =============================================================================
 
 def build_mvssnet(pretrained: bool = True) -> MVSSNet:
-    """
-    Build MVSSNet(nclass=1, sobel=True, constrain=False, n_input=3).
-
-    Uses the full MVSS-Net architecture with its original 3-channel ResNet-50
-    backbone.  1-ch CT slices are repeated to 3-ch in the training loop before
-    the forward pass, preserving the ImageNet pretrained conv1 weights exactly.
-      - Sobel edge-supervision branch on multi-scale features
-      - BayarConv/NoisePrint constraint removed (JPEG/camera-specific, not CT)
-    """
     model = MVSSNet(nclass=1, sobel=True, constrain=False, n_input=3)
     n = sum(p.numel() for p in model.parameters())
     print(f"MVSSNet  params={n:,}")
     return model
 
 def build_mvssnet_no_sobel(pretrained: bool = True) -> MVSSNet:
-    """
-    Build MVSSNet(nclass=1, sobel=False, constrain=False, n_input=3).
-
-    Base MVSS-Net without the Sobel edge-supervision branch, original 3-ch backbone.
-    """
     model = MVSSNet(nclass=1, sobel=False, constrain=False, n_input=3)
     n = sum(p.numel() for p in model.parameters())
     print(f"MVSSNet (no-sobel)  params={n:,}")
     return model
 
-# =============================================================================
 #  Loss — focal + dice
-# =============================================================================
 
 def focal_loss(logits: torch.Tensor, targets: torch.Tensor,
                gamma: float = 2.0, pos_weight: float = 1.0) -> torch.Tensor:
@@ -140,9 +102,6 @@ def dice_loss(logits: torch.Tensor, targets: torch.Tensor,
 def combined_loss(logits, targets, gamma=2.0, pos_weight=1.0, dice_w=0.5):
     return focal_loss(logits, targets, gamma, pos_weight) + dice_w * dice_loss(logits, targets)
 
-# =============================================================================
-#  Datasets
-# =============================================================================
 
 class SliceDataset(Dataset):
     def __init__(self, data_dir: str, tab, target_size: int = 224,
@@ -225,9 +184,6 @@ class VolumeDataset(Dataset):
             imgs_t = F.interpolate(imgs_t, size=self.target_size, mode='bilinear', align_corners=False)
         return dict(images=imgs_t, label=0 if mod == 'real' else 1, mod=mod, img_id=img_id)
 
-# =============================================================================
-#  Evaluation
-# =============================================================================
 
 def _compute_metrics(labels, scores, mods) -> dict:
     y = np.array(labels)
@@ -257,10 +213,6 @@ def _compute_metrics(labels, scores, mods) -> dict:
     return out
 
 def evaluate_slices(model, loader, device) -> tuple:
-    """
-    MVSSNet.forward returns (res1, x0).  We use x0 (main segmentation head)
-    for slice-level scoring.
-    """
     model.eval()
     labels, scores, mods = [], [], []
     with torch.no_grad():
@@ -286,12 +238,9 @@ def evaluate_volumes(model, loader, device) -> dict:
         mods.append(b['mod'][0])
     return _compute_metrics(labels, scores, mods)
 
-# =============================================================================
 #  Localization metrics (pixel-level, fake slices only)
-# =============================================================================
 
 def evaluate_localization(model, loader, device) -> dict:
-    """Pointing Game, Energy on Mask, pixel-AUROC, IoU@{0.3,0.5,0.7} — fake slices only."""
     model.eval()
     _T = (0.3, 0.5, 0.7)
     pg_all, eom_all, pauc_all = [], [], []
@@ -367,9 +316,6 @@ def evaluate_localization(model, loader, device) -> dict:
         },
     }
 
-# =============================================================================
-#  Args
-# =============================================================================
 
 def get_args():
     p = argparse.ArgumentParser(description='MVSS-Net (full, sobel, 1-ch CT) baseline')
@@ -400,9 +346,6 @@ def get_args():
                    help='Skip training; load best_model.pt and run test only')
     return p.parse_args()
 
-# =============================================================================
-#  Main
-# =============================================================================
 
 def main():
     args = get_args()
@@ -424,7 +367,6 @@ def main():
     with open(out_dir / 'args.json', 'w') as f:
         json.dump(args_dict, f, indent=2)
 
-    # ── Data ──────────────────────────────────────────────────────────────
     tr_mods = ['real'] + train_mods
     ts_mods = ['real'] + ALL_FAKES
 
@@ -445,7 +387,6 @@ def main():
     dl_valid = DataLoader(ds_valid, args.batch_size, shuffle=False, **kw)
     dl_test  = DataLoader(ds_test,  args.batch_size, shuffle=False, **kw)
 
-    # ── Model ─────────────────────────────────────────────────────────────
     model = build_mvssnet(pretrained=args.pretrained).to(device)
 
     optimiser = torch.optim.AdamW(model.parameters(), lr=args.lr,
@@ -510,7 +451,6 @@ def main():
                 if patience_counter >= args.patience:
                     print(f"  Early stopping at epoch {epoch}"); break
 
-    # ── Test ──────────────────────────────────────────────────────────────
     ckpt = torch.load(out_dir / 'best_model.pt', map_location=device, weights_only=False)
     model.load_state_dict(ckpt['model_state_dict'])
 

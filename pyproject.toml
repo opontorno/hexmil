@@ -30,7 +30,6 @@ dependencies = [
 
 [project.optional-dependencies]
 nifti = ["nibabel>=5.1"]
-dicom = ["pydicom>=2.4"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

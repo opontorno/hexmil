@@ -1,19 +1,4 @@
 #!/usr/bin/env python3
-"""
-train_3d_resnet.py
-==================
-Training script for the R3D-18 / MC3-18 3D CNN volume baseline.
-
-Loads CT volumes as (1, K, H, W) tensors (H,W resized to 224),
-trains with BCEWithLogitsLoss, AdamW, and cosine LR schedule.
-
-Usage
------
-    python baselines/train_3d_resnet.py \\
-        --data_dir /mnt/.../M3DSynth \\
-        --out_dir  baselines/runs/r3d18_K16 \\
-        --K 16 --epochs 60 --batch_size 4 --lr 1e-4
-"""
 from __future__ import annotations
 
 import argparse
@@ -69,23 +54,7 @@ def select_device(gpu_id: int | None = None) -> torch.device:
         return torch.device('cuda')
 
 
-# =============================================================================
-#  Dataset
-# =============================================================================
-
 class Volume3DDataset(Dataset):
-    """
-    M3DSynth dataset for 3D CNN baselines.
-
-    Each sample is a K-slice sub-volume centred on coord_z (fakes) or
-    randomly drawn (real), resized to (1, K, 224, 224).
-
-    Returns:
-        volume:  (1, K, 224, 224) float32 tensor
-        label:   int  0=real / 1=fake
-        mod:     str  modality name
-        img_id:  str
-    """
 
     TARGET_HW = 224
 
@@ -115,7 +84,6 @@ class Volume3DDataset(Dataset):
         Z_total, H, W = shape
         low, high = get_percentile_tiff_scan(scan_dir, np.uint16)
 
-        # Build K-slice window
         K = self.K
         if mod == 'real':
             max_start = max(0, Z_total - K)
@@ -130,17 +98,14 @@ class Volume3DDataset(Dataset):
                 z_start = 0
         z_end = min(z_start + K, Z_total)
 
-        # Load slices
         chunk = load_slice_tiff_scan(scan_dir, shape, np.uint16, z_start, z_end)
         chunk = apply_percentile(chunk.astype(np.float32), low, high)  # (n, H, W) [0,1]
 
-        # Pad if needed
         n_loaded = chunk.shape[0]
         if n_loaded < K:
             pad = np.zeros((K - n_loaded, H, W), dtype=np.float32)
             chunk = np.concatenate([chunk, pad], axis=0)
 
-        # Optional augmentation
         if self.augment:
             if np.random.rand() > 0.5:
                 chunk = chunk[:, ::-1, :].copy()
@@ -164,10 +129,6 @@ class Volume3DDataset(Dataset):
             'img_id': img_id,
         }
 
-
-# =============================================================================
-#  Training helpers
-# =============================================================================
 
 def per_mod_metrics(labels, scores, mods):
     results = {}
@@ -223,10 +184,6 @@ def evaluate(model: nn.Module, loader: DataLoader, criterion: nn.Module,
     return metrics, labels_np, scores_np, all_mods
 
 
-# =============================================================================
-#  Args
-# =============================================================================
-
 def get_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description='Train R3D-18 3D CNN baseline')
     p.add_argument('--data_dir',    type=str, required=True)
@@ -252,10 +209,6 @@ def get_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-# =============================================================================
-#  Main
-# =============================================================================
-
 def main():
     args = get_args()
     torch.manual_seed(args.seed)
@@ -267,12 +220,10 @@ def main():
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # Save args
     args_dict = vars(args)
     with open(out_dir / 'args.json', 'w') as f:
         json.dump(args_dict, f, indent=2)
 
-    # Data
     train_mods = args.train_mods
     fake_mods  = [m for m in train_mods if m != 'real']
     train_mods_with_real = ['real'] + fake_mods
@@ -298,7 +249,6 @@ def main():
     dl_valid = DataLoader(ds_valid, batch_size=args.batch_size, shuffle=False, **kw)
     dl_test  = DataLoader(ds_test,  batch_size=args.batch_size, shuffle=False, **kw)
 
-    # Model
     model = build_r3d_classifier(
         arch=args.arch, pretrained=args.pretrained, dropout=args.dropout
     ).to(device)
@@ -312,7 +262,6 @@ def main():
         optimiser, T_max=args.epochs, eta_min=args.lr * 0.01
     )
 
-    # WandB
     if args.use_wandb:
         import wandb
         run_name = args.run_name or f"{args.arch}_K{args.K}"
@@ -384,7 +333,6 @@ def main():
                 print(f"  Early stopping at epoch {epoch}")
                 break
 
-    # Test evaluation
     print("\n=== Test Evaluation ===")
     ckpt  = torch.load(out_dir / 'best_model.pt', map_location=device, weights_only=False)
     model.load_state_dict(ckpt['model_state_dict'])

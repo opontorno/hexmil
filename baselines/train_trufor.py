@@ -1,25 +1,4 @@
 #!/usr/bin/env python3
-"""
-train_trufor.py
-===============
-Full TruFor baseline (Guillaro et al., CVPR 2023) — PyTorch, 1-channel CT.
-
-Uses the complete TruFor architecture imported from the official repository:
-  - Noiseprint++ (DnCNN) extractor — frozen, pretrained
-  - Dual-stream CMX encoder (SegFormer-B2 / mit_b2) with FRM + FFM fusion
-  - MLP decoder head for localization (2-class pixel segmentation)
-  - ImageNet preprocessing applied internally by the model
-
-CT adaptation:
-  - 1-channel CT slices are repeated to 3 channels before model input
-  - Volume score = max(softmax(logits)[:,1]) over K slices
-
-Usage
------
-    python baselines/train_trufor.py \
-        --train_mods pix2pix \
-        --epochs 50 --batch_size 4 --lr 5e-5
-"""
 from __future__ import annotations
 
 import argparse
@@ -38,7 +17,6 @@ from torch.utils.data import DataLoader, Dataset, WeightedRandomSampler
 from sklearn.metrics import roc_auc_score, accuracy_score, f1_score, average_precision_score
 from tqdm import tqdm
 
-# ── Path setup ────────────────────────────────────────────────────────────────
 WORK_DIR    = Path(__file__).resolve().parent.parent
 TRUFOR_DIR  = WORK_DIR / 'baselines' / 'git_repo' / 'TruFor' / 'TruFor_train_test'
 sys.path.insert(0, str(WORK_DIR))
@@ -52,22 +30,16 @@ from hexmil.utils.tiff_utils import (
     get_percentile_tiff_scan, apply_percentile,
 )
 
-# ── TruFor model import (official repo) ──────────────────────────────────────
 from yacs.config import CfgNode as CN
 from lib.models.cmx.builder_np_conf import EncoderDecoder
 
 ALL_FAKES = ['pix2pix', 'cycle', 'diffusion']
 
-# Pretrained weight paths
 _MIT_B2_WEIGHTS = str(TRUFOR_DIR / 'pretrained_models' / 'segformers' / 'mit_b2.pth')
 _NPP_WEIGHTS    = str(TRUFOR_DIR / 'pretrained_models' / 'noiseprint++' / 'noiseprint++.th')
 
-# =============================================================================
-#  TruFor config builder
-# =============================================================================
 
 def build_trufor_config() -> CN:
-    """Build a yacs CfgNode matching TruFor's expected config structure."""
     cfg = CN()
     cfg.MODEL = CN()
     cfg.MODEL.NAME = 'detconfcmx'
@@ -99,14 +71,6 @@ def build_trufor_config() -> CN:
 
 
 class TruForCT(nn.Module):
-    """
-    Thin wrapper around the official TruFor EncoderDecoder for 1-ch CT input.
-
-    Handles: 1-ch → 3-ch repeat.  The model itself applies ImageNet
-    normalization internally (cfg.MODEL.EXTRA.PREPRC = 'imagenet').
-
-    forward(x) returns pixel-level logits (B, 2, H, W) for localization.
-    """
     def __init__(self):
         super().__init__()
         cfg = build_trufor_config()
@@ -118,21 +82,13 @@ class TruForCT(nn.Module):
               f"(NP++ frozen)")
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-            x: (B, 1, H, W) — percentile-normalised CT slice in [0, 1]
-        Returns:
-            logits: (B, 2, H, W) — 2-class pixel logits (class 1 = forged)
-        """
         # Repeat 1-ch → 3-ch (TruFor expects RGB [0,1])
         x3 = x.repeat(1, 3, 1, 1)
         out, conf, det, npp = self.model(x3)
         # out is (B, 2, H, W) — already upsampled to input resolution by model
         return out
 
-# =============================================================================
 #  Device selection — picks GPU with most free memory
-# =============================================================================
 
 def select_device(gpu_id: int | None = None) -> torch.device:
     if not torch.cuda.is_available():
@@ -151,23 +107,17 @@ def select_device(gpu_id: int | None = None) -> torch.device:
     except Exception:
         return torch.device('cuda')
 
-# =============================================================================
 #  Focal loss (pixel-level, 2-class)
-# =============================================================================
 
 def focal_loss(logits: torch.Tensor, targets: torch.Tensor,
                gamma: float = 2.0, class_weights: list = [0.5, 2.5]) -> torch.Tensor:
-    """Focal loss for 2-class pixel segmentation.
-    logits: (B, 2, H, W), targets: (B, 1, H, W) float [0,1]."""
     targets_long = targets.squeeze(1).long()  # (B, H, W)
     weight = torch.tensor(class_weights, device=logits.device, dtype=logits.dtype)
     ce = F.cross_entropy(logits, targets_long, weight=weight, reduction='none')
     pt = torch.exp(-ce)
     return ((1 - pt) ** gamma * ce).mean()
 
-# =============================================================================
 #  Datasets  (identical contract to other baseline scripts)
-# =============================================================================
 
 class SliceDataset(Dataset):
     def __init__(self, data_dir: str, tab, target_size: int = 224,
@@ -250,9 +200,6 @@ class VolumeDataset(Dataset):
             imgs_t = F.interpolate(imgs_t, size=self.target_size, mode='bilinear', align_corners=False)
         return dict(images=imgs_t, label=0 if mod == 'real' else 1, mod=mod, img_id=img_id)
 
-# =============================================================================
-#  Evaluation
-# =============================================================================
 
 def _compute_metrics(labels, scores, mods) -> dict:
     y = np.array(labels)
@@ -301,12 +248,9 @@ def evaluate_volumes(model, loader, device) -> dict:
         mods.append(b['mod'][0])
     return _compute_metrics(labels, scores, mods)
 
-# =============================================================================
 #  Localization metrics (pixel-level, fake slices only)
-# =============================================================================
 
 def evaluate_localization(model, loader, device) -> dict:
-    """Pointing Game, Energy on Mask, pixel-AUROC, IoU@{0.3,0.5,0.7} — fake slices only."""
     model.eval()
     _T = (0.3, 0.5, 0.7)
     pg_all, eom_all, pauc_all = [], [], []
@@ -382,9 +326,6 @@ def evaluate_localization(model, loader, device) -> dict:
         },
     }
 
-# =============================================================================
-#  Args
-# =============================================================================
 
 def get_args():
     p = argparse.ArgumentParser(description='TruFor (full) — 1-ch CT')
@@ -411,9 +352,6 @@ def get_args():
                    help='Skip training; load best_model.pt and run test only')
     return p.parse_args()
 
-# =============================================================================
-#  Main
-# =============================================================================
 
 def main():
     args = get_args()
@@ -435,7 +373,6 @@ def main():
     with open(out_dir / 'args.json', 'w') as f:
         json.dump(args_dict, f, indent=2)
 
-    # ── Data ──────────────────────────────────────────────────────────────
     tr_mods = ['real'] + train_mods
     ts_mods = ['real'] + ALL_FAKES
 
@@ -456,7 +393,6 @@ def main():
     dl_valid = DataLoader(ds_valid, args.batch_size, shuffle=False, **kw)
     dl_test  = DataLoader(ds_test,  args.batch_size, shuffle=False, **kw)
 
-    # ── Model ─────────────────────────────────────────────────────────────
     model = TruForCT().to(device)
 
     if not args.eval_only:
@@ -517,7 +453,6 @@ def main():
                 if patience_counter >= args.patience:
                     print(f"  Early stopping at epoch {epoch}"); break
 
-    # ── Test ──────────────────────────────────────────────────────────────
     ckpt = torch.load(out_dir / 'best_model.pt', map_location=device, weights_only=False)
     model.load_state_dict(ckpt['model_state_dict'])
 

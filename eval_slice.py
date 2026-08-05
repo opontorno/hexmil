@@ -1,18 +1,4 @@
 #!/usr/bin/env python3
-"""
-eval_slice.py
-=============
-Stage 1 (SliceMIL) standalone evaluation.
-
-Loads best_model.pt from a run directory and replicates the end-of-training
-test evaluation, producing identical outputs:
-  - evaluation/metrics.json
-  - evaluation/per_sample_metrics.csv
-  - evaluation/{mod}.png  (one per modality)
-
-Usage:
-    python eval_slice.py --run_dir runs/slice-cls_resnet50_p64_s32/trained_on_all
-"""
 
 from __future__ import annotations
 
@@ -25,7 +11,6 @@ from pathlib import Path
 import torch
 from torch.utils.data import DataLoader
 
-# ── Import train module to guarantee identical code paths ────────────────────
 # (importlib handles the hyphen in the filename)
 _TRAIN_PY = Path(__file__).resolve().parent / 'train_slicemil.py'
 if not _TRAIN_PY.exists():
@@ -41,12 +26,8 @@ ALL_FAKES                       = _tm.ALL_FAKES
 SliceDataset                    = _tm.SliceDataset
 load_split_table                = _tm.load_split_table
 run_test_evaluation_slice       = _tm.run_test_evaluation_slice
-build_abmil_classifier_scratch  = _tm.build_abmil_classifier_scratch
+build_slicemil  = _tm.build_slicemil
 
-
-# =============================================================================
-#  CLI
-# =============================================================================
 
 def get_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -61,10 +42,6 @@ def get_args() -> argparse.Namespace:
                         help='GPU id to use (default: cuda:0 if available)')
     return parser.parse_args()
 
-
-# =============================================================================
-#  Main
-# =============================================================================
 
 def main() -> None:
     args = get_args()
@@ -81,7 +58,6 @@ def main() -> None:
     with open(args_path) as f:
         train_args = json.load(f)
 
-    # ── Reconstruct modality sets (mirrors main() in train script) ────────────
     raw_mods       = train_args.get('mods')          # list or None
     fake_mods      = [m for m in raw_mods if m != 'real'] if raw_mods else ALL_FAKES
     ood_fakes      = [m for m in ALL_FAKES if m not in set(fake_mods)]
@@ -89,7 +65,6 @@ def main() -> None:
     patch_size     = int(train_args['patch_size'])
     stride         = train_args.get('stride') or (patch_size // 2)
 
-    # ── Device ───────────────────────────────────────────────────────────────
     if args.gpu_id is not None:
         device = torch.device(f'cuda:{args.gpu_id}')
     elif torch.cuda.is_available():
@@ -107,11 +82,10 @@ def main() -> None:
     print(f"  OOD fakes     : {ood_fakes}")
     print(f"  Test fakes    : {ALL_FAKES}")
 
-    # ── Load model ───────────────────────────────────────────────────────────
     print("\nLoading model...")
     ckpt = torch.load(ckpt_path, map_location='cpu', weights_only=False)
 
-    model = build_abmil_classifier_scratch(
+    model = build_slicemil(
         backbone   = train_args.get('backbone',   'resnet50'),
         pretrained = False,
         patch_size = patch_size,
@@ -126,7 +100,6 @@ def main() -> None:
           f"best_val_loss={ckpt['best_val_loss']:.4f}  "
           f"best_val_auc={ckpt['best_val_auc']:.4f}")
 
-    # ── Build test dataloader (mirrors build_dataloaders in train script) ──────
     print(f"\nBuilding test dataset (fakes: {ALL_FAKES})...")
     tab_test = load_split_table(DATA_DIR, 'test', ['real'] + ALL_FAKES)
     ds_test  = SliceDataset(DATA_DIR, tab_test, patch_size=patch_size,
@@ -135,7 +108,6 @@ def main() -> None:
                           num_workers=args.num_workers, pin_memory=True)
     print(f"  {len(ds_test):6d} slices  ({len(dl_test)} batches)")
 
-    # ── Run test evaluation (exact same function as end of training) ──────────
     print("\nEvaluating...")
     eval_dir = run_dir / 'evaluation'
     results  = run_test_evaluation_slice(
@@ -152,7 +124,6 @@ def main() -> None:
     )
     cls_m = results['classification']
 
-    # ── Print summary ─────────────────────────────────────────────────────────
     print(f"\n{'─'*60}")
     print("  Classification metrics")
     print(f"{'─'*60}")

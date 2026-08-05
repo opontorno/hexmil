@@ -1,19 +1,3 @@
-"""
-volume_classifier.py
----------------------
-HexMIL — Stage 2 volume-level forgery classifier.
-
-Architecture:
-    SliceMIL encoder (FROZEN)  → h_k + sinusoidal positional encoding
-    Gated Volume Aggregator (TRAINABLE):
-        β = softmax(gated_attn([h_1…h_K]))  →  v = Σ β_k h_k
-    MLP head (TRAINABLE): v → logit  (binary BCE)
-
-3-D heatmap: heatmap[k, y, x] = β_k × α̃_k[y, x]
-
-Factory: build_volume_classifier(slice_ckpt_dir, K, attn_dim, dropout, device)
-"""
-
 from __future__ import annotations
 
 import json
@@ -24,25 +8,16 @@ from typing import Optional, Tuple
 import torch
 import torch.nn as nn
 
-from hexmil.models.abmil_slice_classifier import (
-    ABMILSliceClassifier,
+from hexmil.models.slicemil import (
+    SliceMIL,
     GatedAttention,
-    build_abmil_classifier_scratch,
+    build_slicemil,
 )
 
 
-# ---------------------------------------------------------------------------
 #  Positional encoding (sinusoidal, 1-D)
-# ---------------------------------------------------------------------------
 
 class SinPosEncoding(nn.Module):
-    """
-    Fixed sinusoidal positional encoding over a Z-axis index.
-
-    Given an integer z (or a batch of integers), returns a vector of
-    dimension `d_model` following the standard Vaswani formulation.
-    Works for arbitrary z values (not limited to a fixed sequence length).
-    """
 
     def __init__(self, d_model: int):
         super().__init__()
@@ -55,12 +30,6 @@ class SinPosEncoding(nn.Module):
         self.register_buffer("div", div)        # (d_model//2,)
 
     def forward(self, z: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-            z:  Long or Float tensor of any shape (…)
-        Returns:
-            encoding of shape (…, d_model)
-        """
         z = z.float().unsqueeze(-1)             # (…, 1)
         div = self.div                          # (d_model//2,)
         angles = z * div                        # (…, d_model//2)
@@ -70,25 +39,11 @@ class SinPosEncoding(nn.Module):
         return pe
 
 
-# ---------------------------------------------------------------------------
-#  Volume Classifier
-# ---------------------------------------------------------------------------
-
-class VolumeClassifier(nn.Module):
-    """
-    Stage 2 volume-level binary classifier.
-
-    Args:
-        slice_encoder:  ABMILSliceClassifier instance – will be FROZEN.
-        feat_dim:       feature dimension of the slice encoder output.
-        K:              fixed window length (number of slices).
-        attn_dim:       hidden dim for the gated volume attention.
-        dropout:        dropout rate for the MLP head.
-    """
+class HexMIL(nn.Module):
 
     def __init__(
         self,
-        slice_encoder: ABMILSliceClassifier,
+        slice_encoder: SliceMIL,
         feat_dim: int,
         K: int,
         attn_dim: int = 256,
@@ -99,19 +54,15 @@ class VolumeClassifier(nn.Module):
         self.K        = K
         self.feat_dim = feat_dim
 
-        # ── frozen Stage 1 encoder ───────────────────────────────────────
         self.slice_encoder = slice_encoder
         for p in self.slice_encoder.parameters():
             p.requires_grad_(False)
         self.slice_encoder.eval()
 
-        # ── positional encoding (fixed, no learnable params) ────────────
         self.pos_enc = SinPosEncoding(feat_dim)
 
-        # ── gated MIL aggregator over Z ──────────────────────────────────
         self.z_aggregator = GatedAttention(feat_dim, attn_dim, dropout)
 
-        # ── classification head ─────────────────────────────────────────
         self.head = nn.Sequential(
             nn.Linear(feat_dim, 256),
             nn.GELU(),
@@ -119,27 +70,15 @@ class VolumeClassifier(nn.Module):
             nn.Linear(256, 1),
         )
 
-    # ------------------------------------------------------------------
     def train(self, mode: bool = True):
-        """Override train() to always keep slice_encoder in eval mode."""
         super().train(mode)
         self.slice_encoder.eval()
         return self
 
-    # ------------------------------------------------------------------
     @torch.no_grad()
     def _encode_slice(
         self, patches: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        Encode one slice via the frozen Stage 1 model.
-
-        Args:
-            patches:  (N, 1, P, P) — patches for a single slice.
-        Returns:
-            h:     (feat_dim,)  weighted feature vector
-            alpha: (N,)         per-patch attention weights
-        """
         enc       = self.slice_encoder
         patches_b = patches.unsqueeze(0)            # (1, N, 1, P, P)
 
@@ -147,7 +86,6 @@ class VolumeClassifier(nn.Module):
         features  = enc.encode_patches(patches_b)   # (1, N, raw_feat_dim)
         B, N, _   = features.shape
 
-        # 2. Linear projection
         h = enc.projector(
             features.view(B * N, -1)
         ).view(B, N, enc._feat_dim)                 # (1, N, feat_dim)
@@ -157,7 +95,6 @@ class VolumeClassifier(nn.Module):
 
         return z.squeeze(0), alpha_b.squeeze(0)     # (feat_dim,), (N,)
 
-    # ------------------------------------------------------------------
     def forward(
         self,
         patches_seq: torch.Tensor,
@@ -165,25 +102,12 @@ class VolumeClassifier(nn.Module):
         valid_mask:  Optional[torch.Tensor] = None,
         return_attn: bool = False,
     ) -> Tuple[torch.Tensor, Optional[Tuple[torch.Tensor, torch.Tensor]]]:
-        """
-        Args:
-            patches_seq: (K, N, 1, P, P)  — patch bags per slice.
-            z_indices:   (K,)  LongTensor  — actual Z coordinates (−1 = padded).
-            valid_mask:  (K,)  BoolTensor  — True for real slices, False for padding.
-                         If None, derived from z_indices >= 0.
-            return_attn: if True, also return (beta, alpha_list).
-
-        Returns:
-            logit:  scalar tensor               (1,)
-            attn:   (beta (K,), alpha_list list[(N,)] per slice)  iff return_attn
-        """
         K = self.K
         device = patches_seq.device
 
         if valid_mask is None:
             valid_mask = (z_indices >= 0)           # (K,)
 
-        # ── Per-slice encoding ───────────────────────────────────────────
         h_list     = []
         alpha_list = []
         for k in range(K):
@@ -201,12 +125,10 @@ class VolumeClassifier(nn.Module):
 
         H = torch.stack(h_list, dim=0).unsqueeze(0)    # (1, K, feat_dim)
 
-        # ── Positional encoding ─────────────────────────────────────────
         z_clamp  = z_indices.clamp(min=0)               # (K,)
         pe       = self.pos_enc(z_clamp)                # (K, feat_dim)
         H = H + pe.unsqueeze(0)                         # (1, K, feat_dim)
 
-        # ── Gated volume aggregation ────────────────────────────────────
         v, beta = self.z_aggregator(H)                  # (1, feat_dim), (1, K)
         v    = v.squeeze(0)                             # (feat_dim,)
         beta = beta.squeeze(0)                          # (K,)
@@ -217,7 +139,6 @@ class VolumeClassifier(nn.Module):
             beta_sum = beta.sum().clamp(min=1e-8)
             beta = beta / beta_sum
 
-        # ── Classification head ─────────────────────────────────────────
         logit = self.head(v)                            # (1,)
 
         if return_attn:
@@ -225,37 +146,21 @@ class VolumeClassifier(nn.Module):
         return logit, None
 
 
-# ---------------------------------------------------------------------------
-#  Factory
-# ---------------------------------------------------------------------------
-
-def build_volume_classifier(
+def build_hexmil(
     slice_ckpt_dir: str,
     K:             int   = 16,
     attn_dim:      int   = 256,
     dropout:       float = 0.25,
     device:        Optional[torch.device] = None,
-) -> Tuple[VolumeClassifier, dict]:
-    """
-    Build a VolumeClassifier:
-      1. Load Stage 1 args.json from `slice_ckpt_dir`.
-      2. Reconstruct ABMILSliceClassifier and load best_model.pt weights.
-      3. Wrap in VolumeClassifier with gated Z aggregator.
-
-    Returns:
-        model:     VolumeClassifier (Stage 1 encoder frozen)
-        slice_args: dict with Stage 1 configuration (patch_size, stride, …)
-    """
+) -> Tuple[HexMIL, dict]:
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # ── Read Stage 1 args ────────────────────────────────────────────────
     args_path = os.path.join(slice_ckpt_dir, "args.json")
     with open(args_path) as f:
         sargs = json.load(f)
 
-    # ── Re-build Stage 1 model ───────────────────────────────────────────
-    slice_model: ABMILSliceClassifier = build_abmil_classifier_scratch(
+    slice_model: SliceMIL = build_slicemil(
             backbone   = sargs.get("backbone",   "resnet50"),
             pretrained = False,
             patch_size = sargs.get("patch_size", 64),
@@ -272,8 +177,7 @@ def build_volume_classifier(
 
     feat_dim = slice_model.feat_dim
 
-    # ── Wrap in VolumeClassifier ─────────────────────────────────────────
-    model = VolumeClassifier(
+    model = HexMIL(
         slice_encoder = slice_model,
         feat_dim      = feat_dim,
         K             = K,

@@ -1,30 +1,3 @@
-"""
-mvit_classifier.py
-==================
-Multiscale Vision Transformer (MViT-V2) baseline for CT volume binary
-classification.
-
-MViT uses pooling attention with progressive resolution scaling — each stage
-increases spatial/temporal resolution while reducing channel dimension.
-Architecturally distinct from both plain ViT (full attention) and Swin3D
-(shifted local windows): MViT uses pooled Q/K/V with hierarchical feature maps.
-
-Backend: torchvision.models.video (pretrained on Kinetics-400).
-Supported variants:
-  mvit_v1_b  — MViT-B V1  (36.6M params, designed for T=16)
-  mvit_v2_s  — MViT-V2-S  (34.5M params, stronger than V1)  [default]
-  mvit_v2_b  — MViT-V2-B  (51.2M params, highest capacity)
-
-Input: (B, 3, K, H, W) — 3-channel CT volume (1-ch CT repeated to 3-ch in
-the training loop, consistent with all other 3D baselines).
-
-Requirements: torchvision >= 0.14
-
-Usage:
-    from baselines.models.mvit_classifier import build_mvit_classifier
-    model = build_mvit_classifier(arch='mvit_v2_s', pretrained=True)
-    logit = model(x)  # x: (B, 3, 16, 224, 224)
-"""
 from __future__ import annotations
 
 from typing import Optional
@@ -37,15 +10,6 @@ VALID_ARCHS = ('mvit_v1_b', 'mvit_v2_s', 'mvit_v2_b')
 
 
 class MViTClassifier(nn.Module):
-    """
-    MViT (Multiscale Vision Transformer) adapted for CT volume binary
-    classification.
-
-    Args:
-        arch:       'mvit_v1_b', 'mvit_v2_s' (default), or 'mvit_v2_b'
-        pretrained: load torchvision Kinetics-400 pretrained weights
-        dropout:    dropout rate in the classification head
-    """
 
     def __init__(
         self,
@@ -97,23 +61,9 @@ class MViTClassifier(nn.Module):
         self._gradients = grad_out[0].detach()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-            x: (B, 3, K, H, W) — 3-channel CT volume (after channel repeat)
-        Returns:
-            logit: (B, 1)
-        """
         return self.model(x)
 
     def gradcam_3d(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Compute GradCAM from the last normalisation layer.
-
-        Args:
-            x: (1, 3, K, H, W)
-        Returns:
-            cam: (K, H, W) float32, normalised to [0, 1]
-        """
         x = x.requires_grad_(True)
         logit = self.forward(x)
         self.zero_grad()
@@ -164,12 +114,4 @@ def build_mvit_classifier(
     pretrained: bool = False,
     dropout: float = 0.3,
 ) -> MViTClassifier:
-    """
-    Factory for MViTClassifier.
-
-    Args:
-        arch:       'mvit_v1_b' (36.6M), 'mvit_v2_s' (34.5M), 'mvit_v2_b' (51.2M)
-        pretrained: load Kinetics-400 pretrained weights from torchvision
-        dropout:    head dropout rate
-    """
     return MViTClassifier(arch=arch, pretrained=pretrained, dropout=dropout)

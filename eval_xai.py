@@ -1,17 +1,4 @@
 #!/usr/bin/env python3
-"""
-eval_xai.py
-===========
-Quantitative XAI benchmark for SliceMIL (Stage 1) checkpoints.
-
-Compares explanation methods (ABMIL attention, Grad-CAM, Grad-CAM++, random
-baseline, center-prior baseline) on per-sample localisation metrics.
-
-Outputs: per_sample_metrics.csv, summary CSVs, pairwise_tests.csv, figures/.
-
-Usage:
-    python eval_xai.py --run_dir runs/slice-cls_resnet50_p64_s32/trained_on_all
-"""
 
 from __future__ import annotations
 
@@ -29,7 +16,6 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-# Shared XAI utilities
 import sys as _sys
 _sys.path.insert(0, str(Path(__file__).resolve().parent / 'src'))
 from hexmil.utils.xai_utils import (
@@ -41,7 +27,7 @@ from hexmil.utils.xai_utils import (
 )
 
 
-# Import train_slice-cls.py via importlib so we reuse exactly the same dataset/model stack.
+# Import train_slicemil.py via importlib so we reuse exactly the same dataset/model stack.
 _TRAIN_PY = Path(__file__).resolve().parent / 'train_slicemil.py'
 if not _TRAIN_PY.exists():
 	sys.exit(f'[ERROR] train_slicemil.py not found at {_TRAIN_PY}')
@@ -54,7 +40,7 @@ DATA_DIR = _tm.DATA_DIR
 ALL_FAKES = _tm.ALL_FAKES
 SliceDataset = _tm.SliceDataset
 load_split_table = _tm.load_split_table
-build_abmil_classifier_scratch = _tm.build_abmil_classifier_scratch
+build_slicemil = _tm.build_slicemil
 reconstruct_heatmap = _tm.reconstruct_heatmap
 _assemble_slice_preview = _tm._assemble_slice_preview
 
@@ -163,10 +149,7 @@ def _xai_metrics(heatmap: np.ndarray, mask: np.ndarray) -> dict[str, float]:
 	return out
 
 
-
-
 def _select_visual_example_keys(selected: list[dict], n_per_mod: int) -> set[tuple[str, str, int]]:
-	"""Pick up to n_per_mod examples per mod, prioritizing highest mask_sum slices."""
 	if n_per_mod <= 0:
 		return set()
 
@@ -190,7 +173,6 @@ def _save_visual_comparison(
 	methods: list[str],
 	overlay_alpha: float,
 ) -> Path | None:
-	"""Save one compact side-by-side comparison figure with minimal spacing."""
 	try:
 		import matplotlib
 		matplotlib.use('Agg')
@@ -306,7 +288,7 @@ def _summarize(
 def _load_model(run_dir: Path, train_args: dict, device: torch.device):
 	ckpt = torch.load(run_dir / 'best_model.pt', map_location='cpu', weights_only=False)
 	_patch_size = int(train_args.get('patch_size', 64))
-	model = build_abmil_classifier_scratch(
+	model = build_slicemil(
 		backbone=train_args.get('backbone', 'resnet50'),
 		pretrained=False,
 		patch_size=_patch_size,
@@ -370,7 +352,6 @@ def _select_samples(
 			out.extend(cands)
 		return out
 
-	# all_slices mode
 	out = []
 	for batch in tqdm(dl_test, desc='Selecting slices', unit='batch', dynamic_ncols=True):
 		B = len(batch['label'])
@@ -413,10 +394,6 @@ def _select_visual_samples_fast(
 	mods_to_keep: set[str],
 	n_per_mod: int,
 ) -> list[dict]:
-	"""
-	Fast path for qualitative-only mode.
-Collect first non-empty-mask fake slices per modality and stop early.
-	"""
 	if n_per_mod <= 0:
 		return []
 

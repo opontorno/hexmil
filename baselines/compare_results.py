@@ -1,54 +1,4 @@
 #!/usr/bin/env python3
-"""
-compare_results.py — Baseline results aggregator.
-
-Run from the baselines experiment folder:
-
-    python compare_results.py [--runs runs/] [--out_dir results/]
-
-Produces one CSV:
-  results/baselines.csv — one row per (model, stage, trained_on)
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Supported run-directory patterns
-  flat_cnn_{backbone}_K{K}               → slice + volume rows each
-  {r3d18|mc3_18}_K{K}                   → volume row
-  vit_abmil[_K{K}]                       → volume row
-  pool_mil_{mean|max}_{slice|volume}[_K{K}]  → slice or volume row
-  npr_K{K}                               → slice + volume rows
-  freqnet_K{K}                           → slice + volume rows
-  d3_K{K}                                → slice + volume rows
-  deepfeaturex_K{K}                      → slice + volume rows
-  3d_resnet | 3d_densenet | 3d_efficientnet  → volume row (K from args.json)
-  3d_swin[_*]                             → volume row (K from args.json)
-  3d_vit[_*]                              → volume row; arch+variant from args.json
-                                            (variant=plain → model=3d_vit,
-                                             variant=factorised → model=vivit_f)
-  3d_mvit[_*]                             → volume row; arch from args.json
-  hp_fcn_K{K}                            → volume row
-  trufor_K{K}                            → volume row
-  trufor_mitb2_K{K}                      → volume row
-  trufor_full_K{K}                       → slice + volume rows
-  mvssnet_K{K}                           → volume row
-  mvssnet_full_K{K}                      → volume row
-  mantranet_K{K}                         → volume row
-
-Metrics files searched (first found wins):
-  evaluation/metrics.json   — {slice:{…}, volume:{…}} or {volume:{…}}
-  test_metrics.json         — flat {auc, accuracy, f1, ap, per_mod:{…}}
-  results.json              — {slice:{…}, volume:{…}, args:{…}}
-
-CSV columns
-  Meta   : model  arch  stage  K  pool_mode  vol_agg  backbone  trained_on
-  Global : auc  acc  f1  ap
-  Per-mod: {pix2pix,cycle,diffusion}_{auc,acc,f1,ap}
-  Loc    : loc_pixel_auc  loc_pointing_game  loc_energy_on_mask
-           loc_iou_03  loc_iou_05  loc_iou_07
-           (and per-mod variants of each)
-
-Sort order: model → stage → K → trained_on
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-"""
 
 import argparse
 import json
@@ -59,50 +9,32 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-# ── Constants ──────────────────────────────────────────────────────────────────
 _MODS = ["pix2pix", "cycle", "diffusion"]
 
 _TO_ORDER = {"all": 0, "pix2pix": 1, "cycle": 2, "diffusion": 3}
 _MODEL_ORDER = {
     "flat_cnn":         0,
-    "npr":              1,
-    "freqnet":          2,
-    "d3":               3,
-    "deepfeaturex":     4,
-    "pool_mil":         5,
-    "vit_abmil":        6,
-    "r3d":              7,
-    "3d_resnet":        8,
-    "3d_densenet":      9,
-    "3d_efficientnet": 10,
-    "3d_swin":         11,
-    "3d_vit":          12,
-    "vivit_f":         13,
-    "3d_mvit":         14,
-    "hp_fcn":          15,
-    "trufor":          16,
-    "trufor_mitb2":    17,
-    "trufor_full":     18,
-    "mvssnet":         19,
-    "mvssnet_full":    20,
-    "mantranet":       21,
+    "d3":               1,
+    "r3d":              2,
+    "3d_resnet":        3,
+    "3d_densenet":      4,
+    "3d_vit":           5,
+    "vivit_f":          6,
+    "3d_mvit":          7,
+    "hp_fcn":           8,
+    "trufor":           9,
+    "trufor_mitb2":    10,
+    "trufor_full":     11,
+    "mvssnet":         12,
+    "mvssnet_full":    13,
+    "mantranet":       14,
 }
 
-# ── Run-directory name parsers ─────────────────────────────────────────────────
 _FLAT_RE          = re.compile(r"^flat_cnn_(?P<backbone>[^_]+(?:_[^_K][^_]*)*)_K(?P<K>\d+)$")
 _R3D_RE           = re.compile(r"^(?P<arch>r3d\d+|mc3_\d+)_K(?P<K>\d+)$")
-_VIT_RE           = re.compile(r"^vit_abmil(?:_K(?P<K>\d+))?$")   # K is optional
-_POOL_RE          = re.compile(
-    r"^pool_mil_(?P<pool>mean|max)_(?P<stage>slice|volume)(?:_K(?P<K>\d+))?$"
-)
-_NPR_RE           = re.compile(r"^npr_K(?P<K>\d+)$")
-_FREQNET_RE       = re.compile(r"^freqnet_K(?P<K>\d+)$")
 _D3_RE            = re.compile(r"^d3_K(?P<K>\d+)$")
-_DFX_RE           = re.compile(r"^deepfeaturex_K(?P<K>\d+)$")
 _3D_RESNET_RE     = re.compile(r"^3d_resnet$")
 _3D_DENSENET_RE   = re.compile(r"^3d_densenet$")
-_3D_EFFICIENTNET_RE = re.compile(r"^3d_efficientnet$")
-_3D_SWIN_RE       = re.compile(r"^3d_swin(?:_.+)?$")
 _3D_VIT_RE        = re.compile(r"^3d_vit(?:_.+)?$")
 _3D_MVIT_RE       = re.compile(r"^3d_mvit(?:_.+)?$")
 _HPFCN_RE         = re.compile(r"^hp_fcn_K(?P<K>\d+)$")
@@ -147,7 +79,6 @@ def _load_args(sub: Path) -> dict:
 
 
 def _per_mod_cls(per_mod: dict) -> dict:
-    """Flatten per-mod dict → {mod_auc, mod_acc, mod_f1, mod_ap}."""
     out = {}
     for mod in _MODS:
         md = per_mod.get(mod, {})
@@ -159,7 +90,6 @@ def _per_mod_cls(per_mod: dict) -> dict:
 
 
 def _cls_row(block: dict) -> dict:
-    """Extract global cls metrics + per-mod from a metrics block."""
     row = dict(
         auc = _g(block, "auc"),
         acc = _g(block, "accuracy", "acc"),
@@ -171,7 +101,6 @@ def _cls_row(block: dict) -> dict:
 
 
 def _per_mod_loc(per_mod: dict) -> dict:
-    """Flatten per-mod localization dict → {mod_loc_pixel_auc, …}."""
     out = {}
     for mod in _MODS:
         md = per_mod.get(mod, {})
@@ -185,7 +114,6 @@ def _per_mod_loc(per_mod: dict) -> dict:
 
 
 def _loc_row(loc: dict) -> dict:
-    """Extract global + per-mod localization metrics from a 'localization' block."""
     row = dict(
         loc_pixel_auc      = _g(loc, "pixel_auc"),
         loc_pointing_game  = _g(loc, "pointing_game"),
@@ -198,18 +126,11 @@ def _loc_row(loc: dict) -> dict:
     return row
 
 
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Generic helpers to avoid duplicating collector bodies
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 def _collect_2stage(run_dir: Path, regex: re.Pattern,
                     model: str, arch: str, backbone: str,
                     vol_agg: str = "max") -> list[dict]:
-    """Collect slice+volume rows from a run_dir that matches regex.
-
-    Handles metrics files structured as {slice:{…}, volume:{…}} or
-    {volume:{…}} (volume-only).  Also emits localization if present.
-    """
     m = regex.match(run_dir.name)
     if not m:
         return []
@@ -248,12 +169,6 @@ def _collect_2stage(run_dir: Path, regex: re.Pattern,
 def _collect_volume_flat(run_dir: Path, regex: re.Pattern,
                          model: str, arch_fn,
                          backbone: str | None = None) -> list[dict]:
-    """Collect volume rows from a run_dir whose metrics file is flat
-    (no slice/volume wrapper — just {auc, accuracy, f1, ap, per_mod}).
-
-    K is always read from args.json since the dir name may omit it.
-    arch_fn(args) → arch string.
-    """
     m = regex.match(run_dir.name)
     if not m:
         return []
@@ -288,12 +203,7 @@ def _collect_volume_flat(run_dir: Path, regex: re.Pattern,
     return rows
 
 
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# Per-model collectors
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 def _collect_flat_cnn(run_dir: Path) -> list[dict]:
-    """flat_cnn_{backbone}_K{K} → slice + volume rows."""
     m = _FLAT_RE.match(run_dir.name)
     if not m:
         return []
@@ -327,7 +237,6 @@ def _collect_flat_cnn(run_dir: Path) -> list[dict]:
 
 
 def _collect_r3d(run_dir: Path) -> list[dict]:
-    """r3d18_K{K} / mc3_18_K{K} → volume row."""
     return _collect_volume_flat(
         run_dir, _R3D_RE,
         model    = "r3d",
@@ -336,77 +245,11 @@ def _collect_r3d(run_dir: Path) -> list[dict]:
     )
 
 
-def _collect_vit_abmil(run_dir: Path) -> list[dict]:
-    """vit_abmil[_K{K}] → volume row (K from args.json when absent from dir)."""
-    return _collect_volume_flat(
-        run_dir, _VIT_RE,
-        model    = "vit_abmil",
-        arch_fn  = lambda a: f"ViT-d{a.get('embed_dim', '?')}",
-        backbone = None,
-    )
-
-
-def _collect_pool_mil(run_dir: Path) -> list[dict]:
-    """pool_mil_{mean|max}_{slice|volume}[_K{K}] → row per trained_on."""
-    m = _POOL_RE.match(run_dir.name)
-    if not m:
-        return []
-    pool_mode = m.group("pool")
-    stage     = m.group("stage")
-    K         = int(m.group("K")) if m.group("K") else None
-    rows = []
-    for sub in sorted(run_dir.iterdir()):
-        if not sub.is_dir():
-            continue
-        mp = _find_metrics(sub)
-        if mp is None:
-            continue
-        d    = json.loads(mp.read_text())
-        args = _load_args(sub)
-        if K is None:
-            K = args.get("K")
-        block = d.get(stage, d)
-        row = dict(
-            model      = "pool_mil",
-            arch       = f"PoolMIL-{pool_mode}",
-            stage      = stage,
-            K          = K,
-            pool_mode  = pool_mode,
-            vol_agg    = None,
-            backbone   = args.get("backbone", "resnet50"),
-            trained_on = _trained_on(sub.name),
-        )
-        row.update(_cls_row(block))
-        rows.append(row)
-    return rows
-
-
-# ── 2D forensics baselines (slice + volume rows, results.json) ─────────────
-
-def _collect_npr(run_dir: Path) -> list[dict]:
-    """npr_K{K} → slice + volume rows."""
-    return _collect_2stage(run_dir, _NPR_RE, "npr", "NPR-ResNet50", "resnet50")
-
-
-def _collect_freqnet(run_dir: Path) -> list[dict]:
-    """freqnet_K{K} → slice + volume rows."""
-    return _collect_2stage(run_dir, _FREQNET_RE, "freqnet", "FreqNet", "resnet50")
-
-
 def _collect_d3(run_dir: Path) -> list[dict]:
-    """d3_K{K} → slice + volume rows."""
     return _collect_2stage(run_dir, _D3_RE, "d3", "D3-ResNet50-LPF", "resnet50")
 
 
-def _collect_deepfeaturex(run_dir: Path) -> list[dict]:
-    """deepfeaturex_K{K} → slice + volume rows."""
-    return _collect_2stage(run_dir, _DFX_RE, "deepfeaturex", "DeepFeatureX", "resnet50")
-
-
-# ── 3D baselines (volume-only, flat test_metrics.json, K from args) ─────────
-
 def _collect_3d_resnet(run_dir: Path) -> list[dict]:
-    """3d_resnet → volume row."""
     return _collect_volume_flat(
         run_dir, _3D_RESNET_RE,
         model    = "3d_resnet",
@@ -416,7 +259,6 @@ def _collect_3d_resnet(run_dir: Path) -> list[dict]:
 
 
 def _collect_3d_densenet(run_dir: Path) -> list[dict]:
-    """3d_densenet → volume row."""
     return _collect_volume_flat(
         run_dir, _3D_DENSENET_RE,
         model    = "3d_densenet",
@@ -425,33 +267,7 @@ def _collect_3d_densenet(run_dir: Path) -> list[dict]:
     )
 
 
-def _collect_3d_efficientnet(run_dir: Path) -> list[dict]:
-    """3d_efficientnet → volume row."""
-    return _collect_volume_flat(
-        run_dir, _3D_EFFICIENTNET_RE,
-        model    = "3d_efficientnet",
-        arch_fn  = lambda a: a.get("model_name", "efficientnet-b0"),
-        backbone = None,
-    )
-
-
-def _collect_3d_swin(run_dir: Path) -> list[dict]:
-    """3d_swin[_*] → volume row (Swin3D-T)."""
-    return _collect_volume_flat(
-        run_dir, _3D_SWIN_RE,
-        model    = "3d_swin",
-        arch_fn  = lambda _: "Swin3D-T",
-        backbone = None,
-    )
-
-
 def _collect_3d_vit(run_dir: Path) -> list[dict]:
-    """3d_vit[_*] → volume row.
-
-    Reads variant from args.json to route to the correct model key:
-      variant=plain       → model=3d_vit,  arch=ViT3D-{arch}
-      variant=factorised  → model=vivit_f, arch=ViViT-F-{arch}
-    """
     if not _3D_VIT_RE.match(run_dir.name):
         return []
     rows = []
@@ -491,7 +307,6 @@ def _collect_3d_vit(run_dir: Path) -> list[dict]:
 
 
 def _collect_3d_mvit(run_dir: Path) -> list[dict]:
-    """3d_mvit[_*] → volume row (MViT-V2)."""
     return _collect_volume_flat(
         run_dir, _3D_MVIT_RE,
         model    = "3d_mvit",
@@ -500,10 +315,7 @@ def _collect_3d_mvit(run_dir: Path) -> list[dict]:
     )
 
 
-# ── TF / localization baselines ───────────────────────────────────────────────
-
 def _collect_hp_fcn(run_dir: Path) -> list[dict]:
-    """hp_fcn_K{K} → row per trained_on subdirectory."""
     m = _HPFCN_RE.match(run_dir.name)
     if not m:
         return []
@@ -535,7 +347,6 @@ def _collect_hp_fcn(run_dir: Path) -> list[dict]:
 
 
 def _collect_trufor(run_dir: Path) -> list[dict]:
-    """trufor_K{K} → row per trained_on subdirectory."""
     m = _TRUFOR_RE.match(run_dir.name)
     if not m:
         return []
@@ -567,7 +378,6 @@ def _collect_trufor(run_dir: Path) -> list[dict]:
 
 
 def _collect_trufor_mitb2(run_dir: Path) -> list[dict]:
-    """trufor_mitb2_K{K} → row per trained_on subdirectory."""
     m = _TRUFOR_MITB2_RE.match(run_dir.name)
     if not m:
         return []
@@ -599,7 +409,6 @@ def _collect_trufor_mitb2(run_dir: Path) -> list[dict]:
 
 
 def _collect_trufor_full(run_dir: Path) -> list[dict]:
-    """trufor_full_K{K} → slice + volume rows."""
     return _collect_2stage(
         run_dir, _TRUFOR_FULL_RE,
         model    = "trufor_full",
@@ -609,7 +418,6 @@ def _collect_trufor_full(run_dir: Path) -> list[dict]:
 
 
 def _collect_mvssnet(run_dir: Path) -> list[dict]:
-    """mvssnet_K{K} → row per trained_on subdirectory."""
     m = _MVSSNET_RE.match(run_dir.name)
     if not m:
         return []
@@ -641,7 +449,6 @@ def _collect_mvssnet(run_dir: Path) -> list[dict]:
 
 
 def _collect_mvssnet_full(run_dir: Path) -> list[dict]:
-    """mvssnet_full_K{K} → row per trained_on subdirectory."""
     m = _MVSSNET_FULL_RE.match(run_dir.name)
     if not m:
         return []
@@ -673,7 +480,6 @@ def _collect_mvssnet_full(run_dir: Path) -> list[dict]:
 
 
 def _collect_mantranet(run_dir: Path) -> list[dict]:
-    """mantranet_K{K} → row per trained_on subdirectory."""
     m = _MANTRANET_RE.match(run_dir.name)
     if not m:
         return []
@@ -704,23 +510,12 @@ def _collect_mantranet(run_dir: Path) -> list[dict]:
     return rows
 
 
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# Main collector
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 _COLLECTORS = [
     _collect_flat_cnn,
-    _collect_npr,
-    _collect_freqnet,
     _collect_d3,
-    _collect_deepfeaturex,
-    _collect_pool_mil,
-    _collect_vit_abmil,
     _collect_r3d,
     _collect_3d_resnet,
     _collect_3d_densenet,
-    _collect_3d_efficientnet,
-    _collect_3d_swin,
     _collect_3d_vit,
     _collect_3d_mvit,
     _collect_hp_fcn,
@@ -759,8 +554,6 @@ def collect_all(runs_dir: Path) -> pd.DataFrame:
     return df
 
 
-# ── Pretty printer ─────────────────────────────────────────────────────────────
-
 def _pretty(df: pd.DataFrame) -> str:
     disp = df.copy()
     skip = {"K"}
@@ -782,8 +575,6 @@ def _pretty(df: pd.DataFrame) -> str:
             disp[c] = disp[c].fillna("—")
     return disp.to_string(index=False)
 
-
-# ── CLI ────────────────────────────────────────────────────────────────────────
 
 def main():
     here         = Path(__file__).resolve().parent

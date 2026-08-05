@@ -1,34 +1,4 @@
 #!/usr/bin/env python3
-"""
-train_3d_mvit.py
-================
-Training script for the Multiscale Vision Transformer (MViT-V2) volume baseline.
-
-MViT uses pooling attention with hierarchical multi-scale feature maps —
-each stage progressively increases temporal/spatial resolution while reducing
-channel dimensions. Unlike Swin3D (shifted local windows) or plain ViT3D
-(full joint attention), MViT uses pooled Q/K/V for efficient multi-scale
-modelling.
-
-Supported architectures (--arch):
-  mvit_v1_b  — MViT-B V1  (36.6M params, T=16 native)
-  mvit_v2_s  — MViT-V2-S  (34.5M params)  [default]
-  mvit_v2_b  — MViT-V2-B  (51.2M params, highest capacity)
-
-Loads CT volumes as (1, K, H, W) tensors (H,W resized to 224), expands to
-3-channel (channel repeat), trains with BCEWithLogitsLoss, AdamW and cosine
-LR schedule. Protocol identical to all other 3D baselines.
-
-Requirements: torchvision >= 0.14
-
-Usage
------
-    python baselines/train_3d_mvit.py \\
-        --data_dir /mnt/.../M3DSynth \\
-        --out_dir  baselines/runs/3d_mvit_v2_s_K16 \\
-        --arch mvit_v2_s --pretrained \\
-        --K 16 --epochs 60 --batch_size 4 --lr 1e-4
-"""
 from __future__ import annotations
 
 import argparse
@@ -88,18 +58,6 @@ def select_device(gpu_id: int | None = None) -> torch.device:
 
 
 class Volume3DDataset(Dataset):
-    """
-    M3DSynth dataset for 3D baselines.
-
-    Each sample is a K-slice sub-volume centred on coord_z (fakes) or
-    randomly drawn (real), resized to (1, K, 224, 224).
-
-    Returns:
-        volume:  (1, K, 224, 224) float32 tensor
-        label:   int  0=real / 1=fake
-        mod:     str  modality name
-        img_id:  str
-    """
 
     TARGET_HW = 224
 
@@ -380,7 +338,6 @@ def main():
                 print(f'  Early stopping at epoch {epoch}')
                 break
 
-    # Test evaluation
     print('\n=== Test Evaluation ===')
     ckpt = torch.load(out_dir / 'best_model.pt', map_location=device, weights_only=False)
     model.load_state_dict(ckpt['model_state_dict'])

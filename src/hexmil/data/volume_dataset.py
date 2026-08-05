@@ -1,26 +1,3 @@
-"""
-volume_dataset.py
------------------
-Stage 2 (HexMIL) dataset: K consecutive axial slices per sample.
-
-For fake volumes the annotated slice is placed at a random position within
-the K-slice window to prevent positional shortcuts. For real volumes a random
-K-slice window is drawn from the full volume.
-
-Each slice is tiled into a patch bag (same pipeline as SliceDataset) so the
-frozen SliceMIL encoder can process it directly.
-
-Returns a dict with:
-    patches   – (K, N, 1, P, P)  patch bags
-    label     – 0=real / 1=fake  (binary)
-    mod_label – 0-4 multi-class
-    masks     – (K, 1, H, W)     GT masks
-    z_indices – (K,)             actual Z indices (-1 = padded)
-    grid_hw   – (K, 2)           patch grid shape per slice
-    slice_hw  – (2,)             slice resolution
-    mod, img_id, coord_z
-"""
-
 from __future__ import annotations
 
 import os
@@ -41,23 +18,7 @@ from hexmil.data.patch_dataset import MOD_LABEL, load_split_table
 from hexmil.data.slice_dataset import build_patch_grid
 
 
-# ---------------------------------------------------------------------------
-#  Dataset
-# ---------------------------------------------------------------------------
-
 class VolumeDataset(Dataset):
-    """
-    Stage 2 dataset — one sample = window of K axial slices around coord_z.
-
-    Args:
-        data_dir:   M3DSynth root directory.
-        tab:        DataFrame from load_split_table().
-        K:          number of slices in the window (must be even or odd, default 16).
-        patch_size: spatial size of each patch (must match the Stage 1 checkpoint).
-        stride:     sliding-window step for patch extraction.
-                    Default: patch_size // 2.
-        augment:    if True, apply random horizontal/vertical flips.
-    """
 
     def __init__(
         self,
@@ -75,18 +36,15 @@ class VolumeDataset(Dataset):
         self.stride     = stride if stride is not None else patch_size // 2
         self.augment    = augment
 
-    # ------------------------------------------------------------------
     def __len__(self) -> int:
         return len(self.tab)
 
-    # ------------------------------------------------------------------
     def __getitem__(self, idx: int) -> dict:
         row    = self.tab.iloc[idx]
         mod    = row['mod']
         img_id = str(row['img_id'])
         cz     = int(row['coord_z'])
 
-        # ── Load volume metadata ─────────────────────────────────────────
         scan_dir   = os.path.join(self.data_dir, mod, 'scan', img_id)
         shape      = get_shape_tiff_scan(scan_dir)       # (Z_total, H, W)
         Z_total, H, W = shape
@@ -95,7 +53,6 @@ class VolumeDataset(Dataset):
         label_dir  = None if mod == 'real' else \
                      os.path.join(self.data_dir, mod, 'label', img_id)
 
-        # ── Build Z window [z_start, z_start + K) ────────────────────────
         # Real: random consecutive K-slice subvolume (no anchor)
         # Fake: coord_z at a uniformly random position within the window
         K = self.K
@@ -119,7 +76,6 @@ class VolumeDataset(Dataset):
         avail_start = max(z_start, 0)
         avail_end   = min(z_end, Z_total)
 
-        # ── Allocate output tensors ──────────────────────────────────────
         # patches: compute N patches for a reference slice
         dummy_slice = np.zeros((H, W), dtype=np.float32)
         _, _, grid_hw = build_patch_grid(dummy_slice, self.patch_size, self.stride)
@@ -132,7 +88,6 @@ class VolumeDataset(Dataset):
         z_indices   = torch.full((self.K,), fill_value=-1, dtype=torch.long)
         grid_hw_out = torch.tensor([[n_rows, n_cols]] * self.K, dtype=torch.long)
 
-        # ── Load available slices ────────────────────────────────────────
         if avail_end > avail_start:
             scan_chunk = load_slice_tiff_scan(
                 scan_dir, shape, np.uint16, avail_start, avail_end
@@ -168,7 +123,6 @@ class VolumeDataset(Dataset):
                         mk = np.flip(mk, axis=1).copy()
 
                 patches_np, _, _ = build_patch_grid(sl, self.patch_size, self.stride)
-                # (N, P, P)
 
                 patches_out[win_idx] = torch.from_numpy(
                     patches_np
@@ -176,7 +130,6 @@ class VolumeDataset(Dataset):
                 masks_out[win_idx]   = torch.from_numpy(mk).unsqueeze(0).float()
                 z_indices[win_idx]   = global_z
 
-        # ── Labels ──────────────────────────────────────────────────────
         label     = MOD_LABEL.get(mod, 0)   # multiclass: 0=real,1=pix2pix,2=cycle,3=diffusion
         mod_label = label                    # alias kept for compatibility
 

@@ -1,34 +1,4 @@
 #!/usr/bin/env python3
-"""
-train_hp_fcn.py
-===============
-HP-FCN baseline (Li & Huang, ICCV 2019) — TensorFlow, 1-channel CT.
-
-Uses the original HP-FCN architecture from the official repository
-(baselines/git_repo/Deep_inpainting_localization/hp_fcn.py).
-
-The model is reconstructed using tf_slim (the official standalone fork of
-tf.contrib.slim) because the original code requires TF1's tf.contrib which
-was removed in TF2.  The architecture is byte-for-byte identical:
-  HighPassLayer (d1 learnable 3×3 filters, 1ch → 3ch residuals)
-  → ResNet-V2 small backbone (4 blocks: 32,64,128,256, no global pool)
-  → Bilinear upsample ×4  (block4 → block2 resolution)
-  → Bilinear upsample ×4  (→ input resolution)
-  → BatchNorm + ReLU
-  → Conv 5×5 → 2-class pixel logits
-
-Utilities imported directly from the official repo:
-  - bilinear_upsample_weights   (utils/bilinear_upsample_weights.py)
-  - metrics (F1, IoU, MCC)      (utils/metrics.py)
-
-Requirements: pip install tensorflow tf-slim scikit-image
-
-Usage
------
-    python baselines/train_hp_fcn.py \
-        --train_mods pix2pix \
-        --epochs 50 --batch_size 8 --lr 1e-4
-"""
 from __future__ import annotations
 
 import argparse
@@ -44,7 +14,6 @@ import numpy as np
 from sklearn.metrics import roc_auc_score, accuracy_score, f1_score, average_precision_score
 from tqdm import tqdm
 
-# ── GPU must be selected BEFORE any TF import ────────────────────────────────
 # TF enumerates and initialises GPUs at first import; if CUDA_VISIBLE_DEVICES
 # is not set beforehand, TF1 sessions crash with "Error loading CUDA libraries"
 # even when allow_soft_placement=True (that flag covers op placement, not device
@@ -88,7 +57,6 @@ def _select_gpu_early():
 
 _select_gpu_early()
 
-# ── TensorFlow 1.x compat mode ───────────────────────────────────────────────
 import tensorflow.compat.v1 as tf
 tf.disable_v2_behavior()
 
@@ -101,12 +69,6 @@ tf.disable_v2_behavior()
 import types as _types, tensorflow as _tf_real
 
 class _BNCompat:
-    """Pure TF1-graph BatchNormalization for tf_slim compatibility.
-
-    Keras 3 BN does `if training:` internally which crashes in TF1 graph mode
-    when `training` is a symbolic tf.placeholder(tf.bool).  This implementation
-    uses tf.cond so it works with both Python bools and symbolic tensors.
-    """
     def __init__(self, axis=-1, momentum=0.99, epsilon=1e-3,
                  center=True, scale=True,
                  beta_initializer='zeros', gamma_initializer='ones',
@@ -125,7 +87,6 @@ class _BNCompat:
         self.beta = self.gamma = self.moving_mean = self.moving_variance = None
 
     def apply(self, inputs, training=False):
-        """Build the BN subgraph.  `training` may be a Python bool or tf.bool tensor."""
         n_ch = inputs.shape[-1]
         with tf.variable_scope(self.name, reuse=tf.AUTO_REUSE):
             self.moving_mean = tf.get_variable(
@@ -183,7 +144,6 @@ except ImportError:
         "Install with: pip install tf-slim"
     )
 
-# ── Path setup ────────────────────────────────────────────────────────────────
 WORK_DIR   = Path(__file__).resolve().parent.parent
 HPFCN_DIR  = WORK_DIR / 'baselines' / 'git_repo' / 'Deep_inpainting_localization'
 sys.path.insert(0, str(WORK_DIR))
@@ -197,7 +157,6 @@ from hexmil.utils.tiff_utils import (
     get_percentile_tiff_scan, apply_percentile,
 )
 
-# ── Imports from official HP-FCN repo ─────────────────────────────────────────
 # Load individual files directly to avoid utils/__init__.py which imports
 # vgg_mfcn.py → tensorflow.contrib (TF1-only, removed in TF2).
 import importlib.util as _ilu
@@ -217,10 +176,8 @@ repo_metrics              = _rm
 
 ALL_FAKES = ['pix2pix', 'cycle', 'diffusion']
 
-# =============================================================================
 #  HP-FCN Model — architecture from official repo (hp_fcn.py)
 #  Uses tf_slim as drop-in for tf.contrib.slim
-# =============================================================================
 
 # Filter kernels — verbatim from hp_fcn.py (Li & Huang, ICCV 2019)
 FILTERS = {
@@ -244,8 +201,6 @@ FILTERS = {
 
 
 def get_residuals(image, filter_type='d1', filter_trainable=True, image_channel=1):
-    """High-pass filter layer — from hp_fcn.py:get_residuals().
-    Adapted for 1-ch CT input (original uses image_channel=3)."""
     residuals = []
     kernel_index = 0
     for filter_kernel in FILTERS[filter_type]:
@@ -263,7 +218,6 @@ def get_residuals(image, filter_type='d1', filter_trainable=True, image_channel=
 def resnet_small(inputs, num_classes=None, is_training=True, global_pool=True,
                  output_stride=None, include_root_block=True, reuse=None,
                  scope='resnet_small'):
-    """Small ResNet-V2 backbone — from hp_fcn.py:resnet_small()."""
     blocks = [
         resnet_v2.resnet_v2_block('block1', base_depth=32, num_units=2, stride=2),
         resnet_v2.resnet_v2_block('block2', base_depth=64, num_units=2, stride=2),
@@ -278,8 +232,6 @@ def resnet_small(inputs, num_classes=None, is_training=True, global_pool=True,
 
 def build_model(images, filter_type, filter_trainable, weight_decay,
                 batch_size, is_training, num_classes=2):
-    """Full HP-FCN model — from hp_fcn.py:model().
-    Input: (B, H, W, 1) CT slice. Output: 2-class pixel logits."""
     with slim.arg_scope(resnet_v2.resnet_arg_scope(weight_decay=weight_decay)):
         inputs = get_residuals(images, filter_type, filter_trainable, image_channel=1)
         _, end_points = resnet_small(
@@ -314,12 +266,9 @@ def build_model(images, filter_type, filter_trainable, weight_decay,
         preds_map = tf.nn.softmax(logits)[:, :, :, 1]
         return logits, preds, preds_map
 
-# =============================================================================
 #  Loss — focal loss from official repo (utils/losses.py)
-# =============================================================================
 
 def focal_loss_tf(logits, labels, gamma=2.0, num_classes=2):
-    """Focal loss — adapted from utils/losses.py:focal_loss()."""
     logits_flat = tf.reshape(logits, (-1, num_classes))
     label_flat = tf.reshape(labels, (-1, 1))
     one_hot = tf.reshape(tf.one_hot(label_flat, depth=num_classes), (-1, num_classes))
@@ -329,12 +278,9 @@ def focal_loss_tf(logits, labels, gamma=2.0, num_classes=2):
         labels=tf.stop_gradient(one_hot), logits=logits_flat)
     return tf.reduce_mean(tf.multiply(weights, ce))
 
-# =============================================================================
 #  Data loading — M3DSynth CT slices via numpy, fed to TF via feed_dict
-# =============================================================================
 
 def load_slices_numpy(data_dir, tab, target_size=224, desc='loading'):
-    """Load all slices into memory as numpy arrays."""
     from skimage.transform import resize as sk_resize
     images, masks, labels, mods, img_ids = [], [], [], [], []
     for _, row in tqdm(tab.iterrows(), total=len(tab), desc=desc, ncols=80):
@@ -370,14 +316,11 @@ def load_slices_numpy(data_dir, tab, target_size=224, desc='loading'):
 
 
 def make_batches(images, masks, indices, batch_size):
-    """Yield batches of (images, masks) given index order."""
     for start in range(0, len(indices), batch_size):
         idx = indices[start:start + batch_size]
         yield images[idx], masks[idx]
 
-# =============================================================================
 #  Evaluation — same format as other baselines
-# =============================================================================
 
 def _compute_metrics(labels, scores, mods_list) -> dict:
     y = np.array(labels)
@@ -402,7 +345,6 @@ def _compute_metrics(labels, scores, mods_list) -> dict:
 
 
 def evaluate_localization_np(pred_maps, gt_masks, labels, mods_list) -> dict:
-    """Pointing Game, EoM, pixel-AUC, IoU — fake slices only."""
     _T = (0.3, 0.5, 0.7)
     pg_all, eom_all, pauc_all = [], [], []
     iou_all = {t: [] for t in _T}
@@ -453,9 +395,6 @@ def evaluate_localization_np(pred_maps, gt_masks, labels, mods_list) -> dict:
         } for mod, v in per_mod.items() if v['pg']},
     }
 
-# =============================================================================
-#  Args
-# =============================================================================
 
 def get_args():
     p = argparse.ArgumentParser(description='HP-FCN (Li & Huang, ICCV 2019) — TF, 1-ch CT')
@@ -480,16 +419,10 @@ def get_args():
     p.add_argument('--eval_only',    action='store_true', default=False)
     return p.parse_args()
 
-# =============================================================================
-#  Device selection
-# =============================================================================
 
 def select_gpu(gpu_id=None):
     pass  # GPU already selected by _select_gpu_early() before TF import
 
-# =============================================================================
-#  Main
-# =============================================================================
 
 def main():
     args = get_args()
@@ -511,7 +444,6 @@ def main():
     with open(out_dir / 'args.json', 'w') as f:
         json.dump(args_dict, f, indent=2)
 
-    # ── Data ──────────────────────────────────────────────────────────────
     tr_mods = ['real'] + train_mods
     ts_mods = ['real'] + ALL_FAKES
 
@@ -528,7 +460,6 @@ def main():
         args.data_dir, tab_test,  args.target_size, desc='test')
     print(f"Train: {len(tr_imgs)}, Valid: {len(vl_imgs)}, Test: {len(ts_imgs)}")
 
-    # ── Build TF graph ────────────────────────────────────────────────────
     tf.reset_default_graph()
     tf.set_random_seed(args.seed)
 
@@ -567,7 +498,6 @@ def main():
     n_params = sum(int(np.prod(v.shape)) for v in tf.trainable_variables())
     print(f"HP-FCN params={n_params:,}")
 
-    # ── Helper: run inference on a dataset ────────────────────────────────
     def run_inference(sess, imgs, masks):
         all_scores, all_pmaps = [], []
         indices = np.arange(len(imgs))
@@ -579,7 +509,6 @@ def main():
                 all_scores.append(float(pm[i].max()))
         return all_scores, all_pmaps
 
-    # ── Training ──────────────────────────────────────────────────────────
     with tf.Session(config=config) as sess:
         sess.run(tf.global_variables_initializer())
 
@@ -626,7 +555,6 @@ def main():
             if ckpt and ckpt.model_checkpoint_path:
                 saver.restore(sess, ckpt.model_checkpoint_path)
 
-        # ── Test ──────────────────────────────────────────────────────────
         print("\n=== Slice-Level Test ===")
         ts_scores, ts_pmaps = run_inference(sess, ts_imgs, ts_masks)
         sm = _compute_metrics(ts_labels, ts_scores, ts_mods_list)

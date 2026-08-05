@@ -1,28 +1,4 @@
 #!/usr/bin/env python3
-"""
-train_3d_vit.py
-===============
-Training script for the 3D Vision Transformer (ViT3D) volume baseline.
-
-Architecture: pure ViT with tubelet tokenization (ViViT-style), full
-isotropic self-attention over 3D volumetric tokens. Distinct from all
-CNN-based 3D baselines and from Swin3D (which uses local shifted windows).
-
-Loads CT volumes as (1, K, H, W) tensors (H,W resized to 224), expands
-to 3-channel (channel repeat), trains with BCEWithLogitsLoss, AdamW and
-cosine LR schedule. Protocol identical to other 3D baselines.
-
-Token count (default arch=vit3d_base, patch_t=2, patch_s=32, K=32):
-  n_t = 8, n_s = 7x7 = 49 -> 392 patch tokens + 1 CLS = 393 total
-
-Usage
------
-    python baselines/train_3d_vit.py \\
-        --data_dir /mnt/.../M3DSynth \\
-        --out_dir  baselines/runs/3d_vit_base_K32 \\
-        --arch vit3d_base \\
-        --K 32 --epochs 60 --batch_size 4 --lr 1e-4
-"""
 from __future__ import annotations
 
 import argparse
@@ -86,18 +62,6 @@ def select_device(gpu_id: int | None = None) -> torch.device:
 
 
 class Volume3DDataset(Dataset):
-    """
-    M3DSynth dataset for 3D baselines.
-
-    Each sample is a K-slice sub-volume centred on coord_z (fakes) or
-    randomly drawn (real), resized to (1, K, 224, 224).
-
-    Returns:
-        volume:  (1, K, 224, 224) float32 tensor
-        label:   int  0=real / 1=fake
-        mod:     str  modality name
-        img_id:  str
-    """
 
     TARGET_HW = 224
 
@@ -231,7 +195,6 @@ def get_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description='Train ViT 3D / ViViT-F baseline')
     p.add_argument('--data_dir', type=str, required=True)
     p.add_argument('--out_dir',  type=str, required=True)
-    # ViT-specific
     p.add_argument('--arch', type=str, default='vit3d_base',
                    choices=list(ARCH_CONFIGS),
                    help='vit3d_tiny (~5M), vit3d_small (~22M), vit3d_base (~86M)')
@@ -246,7 +209,6 @@ def get_args() -> argparse.Namespace:
                         'use 16 to match pretrained 2D ViT patch grid exactly')
     p.add_argument('--attn_drop', type=float, default=0.0,
                    help='Dropout inside attention softmax')
-    # Common 3D
     p.add_argument('--K',           type=int,   default=16)
     p.add_argument('--pretrained',  action='store_true', default=False,
                    help='Inflate 2D ImageNet ViT weights (timm) into the 3D model')
@@ -304,7 +266,6 @@ def main():
     dl_valid = DataLoader(ds_valid, batch_size=args.batch_size, shuffle=False, **kw)
     dl_test  = DataLoader(ds_test,  batch_size=args.batch_size, shuffle=False, **kw)
 
-    # Token count summary
     n_t = args.K // args.patch_t
     n_s = (224 // args.patch_s) ** 2
     cls_info = '+ 1 CLS' if args.variant == 'plain' else '(global avg pool)'
@@ -407,7 +368,6 @@ def main():
                 print(f'  Early stopping at epoch {epoch}')
                 break
 
-    # Test evaluation
     print('\n=== Test Evaluation ===')
     ckpt = torch.load(out_dir / 'best_model.pt', map_location=device, weights_only=False)
     model.load_state_dict(ckpt['model_state_dict'])

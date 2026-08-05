@@ -1,16 +1,4 @@
 #!/usr/bin/env python3
-"""
-eval_volume.py
-==============
-Stage 2 (HexMIL) standalone evaluation.
-
-Normal mode:   replicates end-of-training test evaluation.
-Full-vol mode: --full_volume → sliding K-slice windows, max-score aggregation.
-
-Usage:
-    python eval_volume.py --run_dir runs/volume-cls_resnet50_p64_s32_K32/trained_on_all
-    python eval_volume.py --run_dir <run_dir> --full_volume
-"""
 from __future__ import annotations
 
 import argparse
@@ -24,7 +12,6 @@ from tqdm import tqdm
 from sklearn.metrics import roc_auc_score, accuracy_score, f1_score
 from scipy.special import expit as sigmoid_np
 
-# ── Import from train_volume-cls.py via importlib ─────────────────────────────
 _TRAIN_SCRIPT = Path(__file__).parent / 'train_hexmil.py'
 _spec = importlib.util.spec_from_file_location('_train_hexmil', _TRAIN_SCRIPT)
 _tm   = importlib.util.module_from_spec(_spec)
@@ -54,7 +41,7 @@ select_best_gpu            = _tm.select_best_gpu
 from hexmil.data.patch_dataset    import load_split_table
 from hexmil.data.volume_dataset   import VolumeDataset
 from hexmil.data.slice_dataset    import reconstruct_heatmap, build_patch_grid
-from hexmil.models.volume_classifier import VolumeClassifier, build_volume_classifier
+from hexmil.models.hexmil import HexMIL, build_hexmil
 from hexmil.utils.tiff_utils import (
     get_shape_tiff_scan, load_slice_tiff_scan,
     get_percentile_tiff_scan, apply_percentile,
@@ -62,10 +49,6 @@ from hexmil.utils.tiff_utils import (
 
 _N_CAND_GRID = 40
 
-
-# =============================================================================
-#  Args
-# =============================================================================
 
 def get_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description='Stage 2 evaluation')
@@ -76,38 +59,30 @@ def get_args() -> argparse.Namespace:
     p.add_argument('--max_vis',     type=int, default=50)
     p.add_argument('--gpu_id',      type=int, default=None)
     p.add_argument('--num_workers', type=int, default=4)
-    p.add_argument('--full_volume', action='store_true',
-                   help='Evaluate on full volumes (sliding K-slice windows) '
-                        'instead of pre-chunked VolumeDataset blocks')
+    p.add_argument('--full_volume', action=argparse.BooleanOptionalAction, default=True,
+                   help='Evaluate on full volumes (sliding K-slice windows). Default: on; '
+                        'pass --no-full_volume for pre-chunked VolumeDataset blocks.')
     p.add_argument('--win_stride', type=int, default=None,
                    help='Step between window starts in slices '
                         '(default: K = non-overlapping). '
                         'Use K//2 for 50%% overlap.')
-    # ── β-threshold heatmap masking (full_volume mode only) ───────────────
     p.add_argument('--beta_thresh', type=float, default=0.2,
                    help='Zero out slices with β_k < beta_thresh from the 3D heatmap '
                         '(with K=16, uniform β≈0.0625)')
-    # ── 3-D projection visualisation ─────────────────────────────────────
     p.add_argument('--save_3d',        action='store_true',
                    help='Save triplanar MIP + 3D scatter projection for summary samples')
     p.add_argument('--attn_thresh_3d', type=float, default=0.3,
                    help='Attention threshold for 3D scatter voxel display')
-    # ── NIfTI export ─────────────────────────────────────────────────────
     p.add_argument('--save_nifti', action='store_true',
                    help='Export volume + attention heatmap as .nii.gz (for 3D Slicer / ITK-SNAP)')
     return p.parse_args()
 
-
-# =============================================================================
-#  Full-volume only helpers
-# =============================================================================
 
 def compute_bbox_iou_3d(
     heatmap: np.ndarray,   # (K, H, W) float32
     mask:    np.ndarray,   # (K, H, W) float32
     thresh:  float = 0.3,
 ) -> float:
-    """3-D bounding-box IoU between thresholded attention and GT mask."""
     az, ay, ax = np.where(heatmap > thresh)
     mz, my, mx = np.where(mask > 0.5)
     if len(az) == 0 or len(mz) == 0:
@@ -139,7 +114,6 @@ def save_volume_3d_projection(
     save_path:   Path,
     attn_thresh: float = 0.3,
 ) -> None:
-    """Triplanar MIP projection + 3-D scatter plot, saved as a single PNG."""
     try:
         import matplotlib
         matplotlib.use('Agg')
@@ -262,7 +236,6 @@ def save_as_nifti(
     out_dir:    Path,
     prefix:     str = '',
 ) -> None:
-    """Export volume and attention heatmap as compressed NIfTI files."""
     try:
         import nibabel as nib
     except ImportError:
@@ -289,19 +262,6 @@ def load_full_volume_windows(
     stride:     int,
     win_stride: int | None = None,
 ) -> dict:
-    """
-    Load an entire CT volume and divide it into K-slice windows.
-
-    Args:
-        win_stride: step between window starts in slices.
-                    Default (None) → K (non-overlapping).
-                    Use K//2 for 50% overlap; overlapping slices are averaged
-                    by run_full_volume_eval when building the 3D heatmap.
-
-    Returns dict with keys: windows, meta, scan_full, mask_full, low, high.
-    Each window dict: patches (K,N,1,P,P), z_indices (K,), valid_mask (K,),
-                      masks_3d (K,H,W), z_start, z_end.
-    """
     scan_dir      = f'{DATA_DIR}/{mod}/scan/{img_id}'
     shape         = get_shape_tiff_scan(scan_dir)
     Z_total, H, W = shape
@@ -366,7 +326,7 @@ def load_full_volume_windows(
 
 @torch.no_grad()
 def _run_window(
-    model:       VolumeClassifier,
+    model:       HexMIL,
     window:      dict,
     device:      torch.device,
     patch_size:  int,
@@ -376,7 +336,6 @@ def _run_window(
     grid_hw:     tuple,
     beta_thresh: float,
 ) -> dict:
-    """Run a single K-slice window through the model."""
     patches_t = window['patches'].to(device)
     z_t       = window['z_indices'].to(device)
     valid_t   = window['valid_mask'].to(device)
@@ -419,7 +378,7 @@ def _run_window(
 
 @torch.no_grad()
 def run_full_volume_eval(
-    model:       VolumeClassifier,
+    model:       HexMIL,
     tab:         pd.DataFrame,
     device:      torch.device,
     patch_size:  int,
@@ -431,20 +390,6 @@ def run_full_volume_eval(
     beta_thresh: float = 0.0,
     win_stride:  int | None = None,
 ) -> dict:
-    """
-    Full-volume evaluation with optional overlapping sliding windows.
-
-    vol_score = max(p_window) across all windows.
-    3D heatmap and beta_full are averaged over all windows that cover each slice,
-    so overlapping slices receive a consensus score rather than whichever window
-    happened to be processed last.
-
-    Args:
-        win_stride: step between window starts (default: K = non-overlapping).
-                    Use K//2 for 50% overlap.
-
-    Returns results dict with keys: cls, xai, grid_samples, per_sample_records.
-    """
     model.eval()
 
     all_scores:  list = []
@@ -484,7 +429,6 @@ def run_full_volume_eval(
         vol_score = max(r['prob'] for r in win_results)
         pred      = 1 if vol_score > 0.5 else 0
 
-        # ── Merge windows → full-volume arrays ─────────────────────────────
         # CT intensities: last-write is fine (same data for every window).
         # Heatmap and beta: accumulate then average over all windows that cover
         # each slice — with no overlap this reduces to a single write;
@@ -513,7 +457,6 @@ def run_full_volume_eval(
 
         z_indices_full = np.arange(Z_total)
 
-        # ── 2-D pixel-level XAI on the slice at coord_z ────────────────────
         # Use hm_full[coord_z] which already averages across all windows
         # that covered that slice (works for both overlap and no-overlap).
         xai_keys_blank = ['pixel_auc', 'iou_03', 'iou_05', 'iou_07',
@@ -605,7 +548,6 @@ def run_full_volume_eval(
                 'k_start':       k_start,
             })
 
-    # ── Select shared img_id for summary grids ─────────────────────────────
     grid_samples: dict = {'removal': {}, 'injection': {}}
     for ty in _VIS_TYS:
         id_sets = [{s['img_id'] for s in grid_cands[ty][m]}
@@ -637,7 +579,6 @@ def run_full_volume_eval(
                                      s_real['volume_3d'].shape[0] - 1))
                 s_real['coord_z_local'] = local
 
-    # ── Classification metrics (balanced, no rem/inj) ──────────────────────
     scores_np = np.array(all_scores)
     labels_np = np.array(all_labels)
     preds_np  = (scores_np >= 0.5).astype(int)
@@ -653,7 +594,6 @@ def run_full_volume_eval(
         for k, v in _balanced_mod_metrics(labels_np, scores_np, preds_np, mods_arr, mod).items():
             cls_metrics[f'{mod}_{k}'] = v
 
-    # ── XAI metrics ────────────────────────────────────────────────────────
     xai_metrics: dict = {}
     if all_xai:
         xai_keys_base = [k for k in all_xai[0] if k not in ('img_id', 'mod')]
@@ -677,10 +617,6 @@ def run_full_volume_eval(
     }
 
 
-# =============================================================================
-#  Main
-# =============================================================================
-
 def main() -> None:
     args = get_args()
 
@@ -700,7 +636,6 @@ def main() -> None:
     patch_size = sargs['patch_size']
     stride     = sargs.get('stride') or (patch_size // 2)
 
-    # ── Device ─────────────────────────────────────────────────────────────
     if args.gpu_id is not None:
         device = torch.device(f'cuda:{args.gpu_id}')
     else:
@@ -715,10 +650,9 @@ def main() -> None:
     print(f"  Device: {device}")
     print(f"  K={K}  patch_size={patch_size}  stride={stride}\n")
 
-    # ── Load model ──────────────────────────────────────────────────────────
     slice_ckpt_dir = saved_args.get('slice_ckpt_dir', '')
     if slice_ckpt_dir and Path(slice_ckpt_dir).exists():
-        model, _ = build_volume_classifier(
+        model, _ = build_hexmil(
             slice_ckpt_dir = slice_ckpt_dir,
             K              = K,
             attn_dim       = saved_args.get('attn_dim', 256),
@@ -727,15 +661,15 @@ def main() -> None:
         )
     else:
         print("[WARN] slice_ckpt_dir not found; rebuilding slice encoder from sargs only")
-        from hexmil.models.abmil_slice_classifier import build_abmil_classifier_scratch
-        slice_model = build_abmil_classifier_scratch(
+        from hexmil.models.slicemil import build_slicemil
+        slice_model = build_slicemil(
             backbone   = sargs.get('backbone', 'resnet50'),
             pretrained = False,
             proj_dim   = sargs.get('proj_dim', 512),
             attn_dim   = sargs.get('attn_dim', 256),
             dropout    = sargs.get('dropout',  0.25),
         )
-        model = VolumeClassifier(
+        model = HexMIL(
             slice_encoder = slice_model,
             feat_dim      = slice_model.feat_dim,
             K             = K,
@@ -749,14 +683,12 @@ def main() -> None:
     print(f"Loaded checkpoint from epoch {ckpt.get('epoch', '?')} "
           f"(val_loss={ckpt.get('best_val_loss', float('nan')):.4f})\n")
 
-    # ── Data — always real + ALL_FAKES, test split ──────────────────────────
     tab = load_split_table(DATA_DIR, 'test', ['real'] + ALL_FAKES)
     print(f"Evaluating {len(tab)} volumes on real + ALL_FAKES (test split)\n")
 
     eval_dir.mkdir(parents=True, exist_ok=True)
     vis_dir = eval_dir / 'per_volume' if args.save_vis else None
 
-    # ── Evaluate ───────────────────────────────────────────────────────────
     if args.full_volume:
         results = run_full_volume_eval(
             model       = model,
@@ -808,7 +740,6 @@ def main() -> None:
         print("Done.")
         return
 
-    # ── Full-volume mode: save outputs ─────────────────────────────────────
     cls_m = results['cls']
     xai_m = results.get('xai', {})
 
@@ -833,7 +764,6 @@ def main() -> None:
         pd.DataFrame(per_sample_records).to_csv(eval_dir / 'per_sample.csv', index=False)
         print(f"  Per-sample CSV → {eval_dir / 'per_sample.csv'}")
 
-    # ── Animated GIFs ──────────────────────────────────────────────────────
     gif_dir = eval_dir / 'gifs'
     for ty in _VIS_TYS:
         for mod, s in grid_samples.get(ty, {}).items():
@@ -860,7 +790,6 @@ def main() -> None:
             )
             print(f"  → Combined GIF: {gif_dir}/{ty}_combined.gif")
 
-    # ── 3-D triplanar projections (optional) ───────────────────────────────
     if args.save_3d:
         proj_dir = eval_dir / 'projections_3d'
         for ty in _VIS_TYS:
@@ -878,7 +807,6 @@ def main() -> None:
                 )
                 print(f"  → 3D:  {proj_dir}/{ty}_{mod}_3d.png")
 
-    # ── NIfTI export (optional) ────────────────────────────────────────────
     if args.save_nifti:
         nii_dir = eval_dir / 'nifti'
         for ty in _VIS_TYS:
@@ -891,7 +819,6 @@ def main() -> None:
                 )
                 print(f"  → NII: {nii_dir}/{ty}_{mod}_volume.nii.gz")
 
-    # ── Nodule context grids ───────────────────────────────────────────────
     for ty in _VIS_TYS:
         if grid_samples.get(ty):
             save_nodule_grid(

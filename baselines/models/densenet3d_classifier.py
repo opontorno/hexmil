@@ -1,15 +1,3 @@
-"""
-densenet3d_classifier.py
-========================
-DenseNet121 3D baseline for CT volume binary classification.
-Built on MONAI DenseNet121 with single-channel input support and GradCAM.
-
-Usage:
-    from baselines.models.densenet3d_classifier import (
-        DenseNet3DClassifier,
-        build_densenet3d_classifier,
-    )
-"""
 from __future__ import annotations
 
 from typing import Optional
@@ -20,13 +8,6 @@ import torch.nn.functional as F
 
 
 class DenseNet3DClassifier(nn.Module):
-    """
-    DenseNet121 3D adapted for single-channel CT volume binary classification.
-
-    Args:
-        pretrained: MONAI pretrained weights flag. Not supported for 3D DenseNet.
-        dropout: dropout rate before the final linear layer.
-    """
 
     def __init__(self, pretrained: bool = False, dropout: float = 0.3):
         super().__init__()
@@ -84,7 +65,6 @@ class DenseNet3DClassifier(nn.Module):
         )
         self.model = base
 
-        # For GradCAM hook
         self._gradients: Optional[torch.Tensor] = None
         self._activations: Optional[torch.Tensor] = None
         self.model.features.denseblock4.register_forward_hook(self._save_activation)
@@ -105,23 +85,9 @@ class DenseNet3DClassifier(nn.Module):
         self._gradients = self._as_tensor(grad_out).detach()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-            x: (B, 1, K, H, W) single-channel 3D volume
-        Returns:
-            logit: (B, 1)
-        """
         return self.model(x)
 
     def gradcam_3d(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Compute GradCAM attention map for a single volume.
-
-        Args:
-            x: (1, 1, K, H, W)
-        Returns:
-            cam: (K, H, W) float32, normalized to [0, 1]
-        """
         x = x.requires_grad_(True)
         logit = self.forward(x)
         self.zero_grad()

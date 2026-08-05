@@ -7,7 +7,7 @@
 <p>
   <a href="#"><img src="https://img.shields.io/badge/ACM%20MM-2026-0d9488.svg" alt="Venue"></a>
   <a href="#"><img src="https://img.shields.io/badge/Paper-PDF-b31b1b.svg" alt="Paper"></a>
-  <a href="./docs/index.html"><img src="https://img.shields.io/badge/Project-Page-0f766e.svg" alt="Project Page"></a>
+  <a href="https://opontorno.github.io/hexmil/"><img src="https://img.shields.io/badge/Project-Page-0f766e.svg" alt="Project Page"></a>
   <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License"></a>
   <img src="https://img.shields.io/badge/python-3.11%2B-blue.svg" alt="Python">
 </p>
@@ -39,7 +39,35 @@ computation* that produces the classification score, the resulting spatial attri
 | Best baseline | 82.9 | 80.8 | 38.1 | 67.5 |
 | **HexMIL** | **92.0** | **90.2** | **42.4** | **70.6** |
 
-<sub>Averaged across cross-generator transfers on M3DSynth + CT-GAN. See the <a href="./docs/index.html">project page</a> for the full tables.</sub>
+<sub>Averaged across cross-generator transfers on M3DSynth + CT-GAN. See the <a href="https://opontorno.github.io/hexmil/">project page</a> for the full tables.</sub>
+
+---
+
+## Quick Start
+
+```bash
+# 1 — Clone & install (installs HexMIL + all dependencies)
+git clone https://github.com/opontorno/hexmil.git
+cd hexmil
+conda create -n hexmil python=3.11 -y && conda activate hexmil
+pip install -e .
+
+# 2 — Point HexMIL at your data  ──  THE ONLY REQUIRED EDIT  ──
+#     edit DATA_DIR in config.py, or export it:
+export HEXMIL_DATA_DIR=/path/to/data
+
+# 3 — Train the two-stage pipeline (always run from the repo root)
+python train.py --mods pix2pix
+
+# 4 — Evaluate and export the 3D attention maps
+python eval_volume.py --run_dir runs/hexmil_resnet50_p64_s32_K32/trained_on_pix2pix --save_3d
+```
+
+> ⚙️ **The only thing you must configure is the dataset path** (`DATA_DIR`); everything else has
+> sensible defaults. Run all scripts **from the repository root** (they import `config.py`).
+> Experiment logging is **off by default** — add `--wandb_mode online` to enable [Weights & Biases](https://wandb.ai).
+
+**Pretrained checkpoints:** _coming soon_ — for now the pipeline trains from scratch.
 
 ---
 
@@ -64,23 +92,26 @@ HexMIL is trained in two sequential stages (see figure above):
 ## Installation
 
 ```bash
-git clone <this-repo-url> hexmil
+git clone https://github.com/opontorno/hexmil.git
 cd hexmil
 
 conda create -n hexmil python=3.11 -y
 conda activate hexmil
 
-# Install a CUDA-matched PyTorch build first (see https://pytorch.org), then:
-pip install -r requirements.txt
-pip install -e .
+# (optional) install a CUDA-matched PyTorch build first — see https://pytorch.org
+pip install -e .                 # installs HexMIL + all dependencies (from pyproject.toml)
+pip install -e ".[nifti]"        # optional: NIfTI export of 3D attention volumes
 ```
+
+All dependencies are declared once in `pyproject.toml`; `requirements.txt` simply installs the
+package, so `pip install -r requirements.txt` and `pip install -e .` are equivalent.
 
 ---
 
 ## Configuration
 
-All filesystem paths live in a single file: [`config.py`](./config.py). In most cases you only need
-to set **one** variable:
+All filesystem paths live in a single file: [`config.py`](./config.py). **The only variable you
+must set is `DATA_DIR`:**
 
 ```python
 DATA_DIR = "/path/to/M3DSynth"   # root holding data.csv + sets.csv
@@ -133,18 +164,21 @@ python train.py                         # in-domain: train on all modalities
 **Or run each stage individually:**
 
 ```bash
-# Stage 1 — SliceMIL  →  runs/slice-cls_resnet50_p64_s32/trained_on_pix2pix/
+# Stage 1 — SliceMIL  →  runs/slicemil_resnet50_p64_s32/trained_on_pix2pix/
 python train_slicemil.py --backbone resnet50 --patch_size 64 --mods pix2pix
 
-# Stage 2 — HexMIL     →  runs/volume-cls_resnet50_p64_s32_K32/trained_on_pix2pix/
+# Stage 2 — HexMIL     →  runs/hexmil_resnet50_p64_s32_K32/trained_on_pix2pix/
 python train_hexmil.py \
-    --slice_ckpt_dir runs/slice-cls_resnet50_p64_s32/trained_on_pix2pix \
+    --slice_ckpt_dir runs/slicemil_resnet50_p64_s32/trained_on_pix2pix \
     --K 32
 ```
 
+To reproduce the full **cross-generator protocol** (paper Table 1), repeat with each
+`--mods {pix2pix, cycle, diffusion, ctgan}`; every held-out generator becomes the OOD test set.
+
 Each run directory contains `best_model.pt`, `args.json` (full reproducibility record),
-per-split metrics, and periodic visualizations. Use `--gpu_id`,
-`--wandb_mode {online,offline,disabled}` and `--seed` (default `42`) as needed.
+per-split metrics, and periodic visualizations. Useful flags: `--gpu_id`, `--seed` (default `42`),
+and `--wandb_mode online` to enable logging (disabled by default).
 
 ---
 
@@ -152,18 +186,30 @@ per-split metrics, and periodic visualizations. Use `--gpu_id`,
 
 ```bash
 # Slice-level metrics (Stage 1)
-python eval_slice.py  --run_dir runs/slice-cls_resnet50_p64_s32/trained_on_pix2pix
+python eval_slice.py  --run_dir runs/slicemil_resnet50_p64_s32/trained_on_pix2pix
 
-# Volume-level metrics + 3D attention heatmaps (Stage 2)
-python eval_volume.py --run_dir runs/volume-cls_resnet50_p64_s32_K32/trained_on_pix2pix --save_3d
+# Volume-level metrics + 3D attention heatmaps (Stage 2) — full volume by default
+python eval_volume.py --run_dir runs/hexmil_resnet50_p64_s32_K32/trained_on_pix2pix --save_3d
 
 # XAI benchmark: HexMIL attention vs. Grad-CAM / Grad-CAM++ (pixel-AUC, IoU, Pointing Game)
-python eval_xai.py    --run_dir runs/slice-cls_resnet50_p64_s32/trained_on_pix2pix
-
-# Inference on a single scan (TIFF stack or DICOM series) — writes 3D heatmap + bounding box
-python inference.py   --run_dir runs/volume-cls_resnet50_p64_s32_K32/trained_on_pix2pix \
-                      --scan_dir /path/to/scan --save_3d
+python eval_xai.py    --run_dir runs/slicemil_resnet50_p64_s32/trained_on_pix2pix
 ```
+
+---
+
+## Inference
+
+Run a trained HexMIL model on a single scan (TIFF stack) — no ground-truth labels required. The
+whole volume is swept with sliding `K`-slice windows and the output includes the tampered/pristine
+prediction plus the 3D attention heatmap and bounding box:
+
+```bash
+python inference.py --run_dir runs/hexmil_resnet50_p64_s32_K32/trained_on_pix2pix \
+                     --scan_dir /path/to/scan --save_3d
+```
+
+Add `--label_dir /path/to/masks` if ground-truth manipulation masks are available (for visual
+comparison only), and `--save_nifti` to also export the volume and heatmap as `.nii.gz`.
 
 ---
 
@@ -195,7 +241,6 @@ hexmil/
 ├── inference.py              # single-scan inference
 ├── src/hexmil/               # installable package (data / models / utils)
 ├── baselines/                # SOTA comparison suite (+ clone_repos.sh)
-├── experiments/              # auxiliary studies (patch-level feasibility)
 └── docs/                     # project page (GitHub Pages)
 ```
 
@@ -204,13 +249,11 @@ hexmil/
 ## Citation
 
 ```bibtex
-@inproceedings{hexmil2026,
-  title     = {HexMIL: Hierarchical Attention MIL for Ante-Hoc Explainable
-               Detection of AI-Manipulated CT Volumes},
-  author    = {Anonymous Author(s)},
-  booktitle = {Proceedings of the 34th ACM International Conference on Multimedia (MM '26)},
+@inproceedings{pontorno2026hexmil,
+  title     = {{HexMIL: Hierarchical Attention MIL for Ante-Hoc Explainable Detection of AI-Manipulated CT Volumes}},
+  author={Pontorno, Orazio and Guarnera, Luca and Akhtar, Zahid and Battiato, Sebastiano},
+  booktitle={Proceedings of the 34th ACM International Conference on Multimedia},
   year      = {2026},
-  publisher = {ACM}
 }
 ```
 

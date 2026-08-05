@@ -1,20 +1,4 @@
 #!/usr/bin/env python3
-"""
-train_flat_cnn.py
-=================
-Baseline: standard ResNet-50 on full 2D CT slices (no patch extraction,
-no MIL attention). Volume-level prediction via max/mean probability
-across K slices at inference time.
-
-Proves: hierarchical patch-level MIL adds value over a flat 2D classifier.
-
-Usage
------
-    python baselines/train_flat_cnn.py \
-        --data_dir /mnt/.../M3DSynth \
-        --out_dir  baselines/runs/flat_cnn_resnet50 \
-        --epochs 50 --batch_size 16 --lr 1e-4
-"""
 from __future__ import annotations
 
 import argparse
@@ -71,12 +55,7 @@ def select_device(gpu_id: int | None = None) -> torch.device:
         return torch.device('cuda')
 
 
-# =============================================================================
-#  Datasets
-# =============================================================================
-
 class FlatSliceDataset(Dataset):
-    """One sample = one full axial slice at coord_z, resized to target_size."""
 
     def __init__(self, data_dir, tab, target_size=224, augment=False):
         self.data_dir    = data_dir
@@ -118,7 +97,6 @@ class FlatSliceDataset(Dataset):
         return dict(image=img, label=label, mod=mod, img_id=img_id, coord_z=cz)
 
 class VolumeSliceDataset(Dataset):
-    """K-slice window dataset for volume-level evaluation of a 2D model."""
 
     def __init__(self, data_dir, tab, K=16, target_size=224):
         self.data_dir    = data_dir
@@ -174,13 +152,8 @@ class VolumeSliceDataset(Dataset):
         return dict(slices=slices_out, valid=valid, label=label,
                     mod=mod, img_id=img_id)
 
-# =============================================================================
-#  Model
-# =============================================================================
 
 def build_flat_cnn(pretrained=True, dropout=0.25):
-    """ResNet-50 original 3-ch backbone → binary logit.
-    1-ch CT slices are repeated to 3-ch in the training loop."""
     import timm
     model = timm.create_model(
         'resnet50', pretrained=pretrained, num_classes=1,
@@ -192,9 +165,6 @@ def build_flat_cnn(pretrained=True, dropout=0.25):
     )
     return model
 
-# =============================================================================
-#  Metrics
-# =============================================================================
 
 def per_mod_metrics(labels, scores, mods):
     results = {}
@@ -214,9 +184,6 @@ def per_mod_metrics(labels, scores, mods):
         )
     return results
 
-# =============================================================================
-#  Training helpers
-# =============================================================================
 
 def evaluate_slices(model, loader, criterion, device):
     model.eval()
@@ -250,7 +217,6 @@ def evaluate_slices(model, loader, criterion, device):
 
 @torch.no_grad()
 def evaluate_volumes(model, loader, device, agg='max'):
-    """Volume-level evaluation: aggregate 2D predictions over K slices."""
     model.eval()
     all_probs, all_labels, all_mods = [], [], []
 
@@ -297,9 +263,6 @@ def evaluate_volumes(model, loader, device, agg='max'):
         m['per_mod'] = per_mod_metrics(labels, scores, all_mods)
     return m
 
-# =============================================================================
-#  Args
-# =============================================================================
 
 def get_args():
     p = argparse.ArgumentParser(description='Flat CNN baseline (ResNet-50 on slices)')
@@ -327,9 +290,6 @@ def get_args():
     p.add_argument('--amp',          action='store_true', default=True)
     return p.parse_args()
 
-# =============================================================================
-#  Main
-# =============================================================================
 
 def main():
     args = get_args()
@@ -339,7 +299,6 @@ def main():
     device = select_device(args.gpu_id)
     print(f"Device: {device}")
 
-    # Output directory
     train_mods = args.train_mods or ALL_FAKES
     mods_tag   = '+'.join(sorted(train_mods))
     if args.out_dir is None:
@@ -366,7 +325,6 @@ def main():
     ds_valid = FlatSliceDataset(args.data_dir, tab_valid, args.target_size, augment=False)
     ds_test  = FlatSliceDataset(args.data_dir, tab_test,  args.target_size, augment=False)
 
-    # Weighted sampler
     labels_arr = tab_train['mod'].apply(lambda m: 0 if m == 'real' else 1).values
     cls_count  = np.bincount(labels_arr)
     cls_w      = 1.0 / np.maximum(cls_count, 1)
@@ -382,7 +340,6 @@ def main():
     dl_test  = DataLoader(ds_test,  batch_size=args.batch_size,
                           shuffle=False, **kw)
 
-    # Model
     model = build_flat_cnn(pretrained=args.pretrained, dropout=args.dropout)
     model = model.to(device)
     n_params = sum(p.numel() for p in model.parameters())
@@ -403,7 +360,6 @@ def main():
         wandb.init(project='MedForensics-baselines', name=run_name,
                    config=args_dict)
 
-    # ── Training loop ─────────────────────────────────────────────────────
     best_val_loss    = float('inf')
     patience_counter = 0
 
@@ -471,7 +427,6 @@ def main():
                 print(f"  Early stopping at epoch {epoch}")
                 break
 
-    # ── Test evaluation (slice-level) ─────────────────────────────────────
     print("\n=== Slice-Level Test ===")
     ckpt = torch.load(out_dir / 'best_model.pt', map_location=device,
                        weights_only=False)
@@ -486,7 +441,6 @@ def main():
     for mod, mm in test_m.get('per_mod', {}).items():
         print(f"    {mod:12s}  AUC={mm['auc']:.4f}  F1={mm['f1']:.4f}")
 
-    # ── Test evaluation (volume-level, max/mean over K slices) ────────────
     print(f"\n=== Volume-Level Test (agg={args.vol_agg}, K={args.K}) ===")
     ds_test_vol = VolumeSliceDataset(
         args.data_dir, tab_test, K=args.K, target_size=args.target_size,
@@ -499,7 +453,6 @@ def main():
     for mod, mm in vol_m.get('per_mod', {}).items():
         print(f"    {mod:12s}  AUC={mm['auc']:.4f}  F1={mm['f1']:.4f}")
 
-    # ── Save results ──────────────────────────────────────────────────────
     all_metrics = dict(
         slice=test_m,
         volume=vol_m,
