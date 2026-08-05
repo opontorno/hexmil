@@ -34,41 +34,6 @@ full-resolution 3D attention volume. Because these attention weights are the *ex
 computation* that produces the classification score, the resulting spatial attribution is
 **ante-hoc** and structurally faithful — unlike post-hoc approximations such as Grad-CAM.
 
-| | OOD AUC | OOD F1 | Loc. IoU | Loc. PG |
-|---|:---:|:---:|:---:|:---:|
-| Best baseline | 82.9 | 80.8 | 38.1 | 67.5 |
-| **HexMIL** | **92.0** | **90.2** | **42.4** | **70.6** |
-
-<sub>Averaged across cross-generator transfers on M3DSynth + CT-GAN. See the <a href="https://opontorno.github.io/hexmil/">project page</a> for the full tables.</sub>
-
----
-
-## Quick Start
-
-```bash
-# 1 — Clone & install (installs HexMIL + all dependencies)
-git clone https://github.com/opontorno/hexmil.git
-cd hexmil
-conda create -n hexmil python=3.11 -y && conda activate hexmil
-pip install -e .
-
-# 2 — Point HexMIL at your data  ──  THE ONLY REQUIRED EDIT  ──
-#     edit DATA_DIR in config.py, or export it:
-export HEXMIL_DATA_DIR=/path/to/data
-
-# 3 — Train the two-stage pipeline (always run from the repo root)
-python train.py --mods pix2pix
-
-# 4 — Evaluate and export the 3D attention maps
-python eval_volume.py --run_dir runs/hexmil_resnet50_p64_s32_K32/trained_on_pix2pix --save_3d
-```
-
-> ⚙️ **The only thing you must configure is the dataset path** (`DATA_DIR`); everything else has
-> sensible defaults. Run all scripts **from the repository root** (they import `config.py`).
-> Experiment logging is **off by default** — add `--wandb_mode online` to enable [Weights & Biases](https://wandb.ai).
-
-**Pretrained checkpoints:** _coming soon_ — for now the pipeline trains from scratch.
-
 ---
 
 ## Method
@@ -136,7 +101,7 @@ Both datasets are publicly released by their respective authors and are **not re
 Point `DATA_DIR` to the M3DSynth root, which is expected to contain:
 
 ```
-M3DSynth/
+data/
 ├── data.csv                    # per-volume metadata (img_id, mod, ty, coord_z/y/x, …)
 ├── sets.csv                    # patient-level train/valid/test split
 ├── ctgan_data.csv              # (optional) CT-GAN metadata
@@ -144,7 +109,8 @@ M3DSynth/
 ├── real/      scan/<img_id>/   # multi-page TIFF stacks (one page = one axial slice)
 ├── pix2pix/   scan/…  label/…  # `label/` = binary manipulation masks (eval only)
 ├── cycle/     scan/…  label/…
-└── diffusion/ scan/…  label/…
+├── diffusion/ scan/…  label/…
+└── ctgan/     scan/…  label/…
 ```
 
 Modalities are selected per run via `--mods`. Training on a **single** modality (e.g. `pix2pix`)
@@ -173,12 +139,12 @@ python train_hexmil.py \
     --K 32
 ```
 
-To reproduce the full **cross-generator protocol** (paper Table 1), repeat with each
+To reproduce the full **cross-generator protocol**, repeat with each
 `--mods {pix2pix, cycle, diffusion, ctgan}`; every held-out generator becomes the OOD test set.
 
 Each run directory contains `best_model.pt`, `args.json` (full reproducibility record),
-per-split metrics, and periodic visualizations. Useful flags: `--gpu_id`, `--seed` (default `42`),
-and `--wandb_mode online` to enable logging (disabled by default).
+per-split metrics, and periodic visualizations. Useful flags: `--gpu_id`,
+and `--wandb_mode` to enable logging (disabled by default).
 
 ---
 
@@ -210,20 +176,6 @@ python inference.py --run_dir runs/hexmil_resnet50_p64_s32_K32/trained_on_pix2pi
 
 Add `--label_dir /path/to/masks` if ground-truth manipulation masks are available (for visual
 comparison only), and `--save_nifti` to also export the volume and heatmap as `.nii.gz`.
-
----
-
-## Baselines
-
-We compare against an extensive suite of forensics and 3D detectors, imported **verbatim** from
-their official repositories for a fair comparison. Fetch them at their pinned commits with:
-
-```bash
-bash baselines/clone_repos.sh
-```
-
-Training scripts, protocol details and the full catalogue are documented in
-[`baselines/README.md`](./baselines/README.md).
 
 ---
 
