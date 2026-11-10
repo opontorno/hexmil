@@ -205,6 +205,7 @@ hexmil/
   title     = {{HexMIL: Hierarchical Attention MIL for Ante-Hoc Explainable Detection of AI-Manipulated CT Volumes}},
   author={Pontorno, Orazio and Guarnera, Luca and Akhtar, Zahid and Battiato, Sebastiano},
   booktitle={Proceedings of the 34th ACM International Conference on Multimedia},
+  pages = {8162–8171},
   year      = {2026},
 }
 ```
