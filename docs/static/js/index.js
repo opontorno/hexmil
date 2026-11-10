@@ -48,3 +48,34 @@ window.addEventListener('scroll', () => {
     }
   });
 }, { passive: true });
+
+// ── Paper dropdown ─────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  const dropdown = document.getElementById('paper-dropdown');
+  if (!dropdown) return;
+
+  const button = dropdown.querySelector('button');
+  const setOpen = (open) => {
+    dropdown.classList.toggle('is-open', open);
+    button.setAttribute('aria-expanded', String(open));
+  };
+
+  button.addEventListener('click', () => {
+    setOpen(!dropdown.classList.contains('is-open'));
+  });
+
+  document.addEventListener('click', (event) => {
+    if (!dropdown.contains(event.target)) setOpen(false);
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && dropdown.classList.contains('is-open')) {
+      setOpen(false);
+      button.focus();
+    }
+  });
+
+  dropdown.querySelectorAll('a').forEach(link => {
+    link.addEventListener('click', () => setOpen(false));
+  });
+});
